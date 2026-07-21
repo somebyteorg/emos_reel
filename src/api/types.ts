@@ -98,6 +98,7 @@ export interface MediaVersion {
   media_name: string
   media_size: number
   media_second: number
+  storage_title: string
 }
 
 export interface MediaSource {

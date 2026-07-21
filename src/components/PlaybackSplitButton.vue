@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { Check, ChevronDown, Play } from '@lucide/vue'
+import { Check, ChevronDown, CircleCheck, File, HardDrive, Play } from '@lucide/vue'
 import { onClickOutside, useEventListener } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { formatFileSize } from '@/utils/file-size'
@@ -74,8 +74,13 @@ const props = defineProps<{
             type="button"
             @click="selectVersion(version.media_id)">
             <span class="selection-mark"><Check v-if="version.media_id === modelValue" :size="15" /></span>
-            <span class="version-name">{{ version.media_name }}</span>
-            <small>{{ formatFileSize(version.media_size) }}</small>
+            <span class="version-copy">
+              <span class="version-name">{{ version.media_name }}</span>
+              <span class="version-meta">
+                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="12" />{{ version.storage_title }}</span>
+                <small class="file-size"><File :size="12" />{{ formatFileSize(version.media_size) }}</small>
+              </span>
+            </span>
           </button>
         </div>
       </div>
@@ -85,11 +90,12 @@ const props = defineProps<{
     <p v-else-if="!versions.length && !loading" class="action-message">当前内容暂无播放版本</p>
 
     <div v-if="selectedVersion" class="selected-version">
-      <span>
-        <b>当前版本</b>
+      <span aria-label="当前版本" class="selected-version-name" title="当前版本">
+        <CircleCheck :size="12" />
         {{ selectedVersion.media_name }}
       </span>
-      <small>{{ formatFileSize(selectedVersion.media_size) }}</small>
+      <span v-if="selectedVersion.storage_title" class="selected-storage"><HardDrive :size="12" />{{ selectedVersion.storage_title }}</span>
+      <small class="selected-file-size"><File :size="12" />{{ formatFileSize(selectedVersion.media_size) }}</small>
       <button v-if="canRestart" type="button" @click="emit('play', true)">从头播放</button>
     </div>
 
@@ -181,17 +187,51 @@ const props = defineProps<{
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .selected-version b {
-    margin-right: 8px;
-    color: var(--reel-muted);
-    font-size: 10px;
-    font-weight: 700;
+  .selected-version-name {
+    display: inline-flex;
+    min-height: 16px;
+    align-items: center;
+    gap: 5px;
+    line-height: 1;
+  }
+  .selected-version-name svg {
+    display: block;
+    flex: 0 0 auto;
+    color: var(--reel-accent-soft);
   }
   .selected-version small {
     flex: 0 0 auto;
     color: rgba(156, 157, 163, 0.78);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
+  }
+  .selected-file-size {
+    display: inline-flex;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+  }
+  .selected-file-size svg {
+    display: block;
+    flex: 0 0 auto;
+  }
+  .selected-storage {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    color: rgba(210, 211, 207, 0.68);
+    font-size: 11px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .selected-storage svg {
+    display: block;
+    flex: 0 0 auto;
   }
   .selected-version button {
     flex: 0 0 auto;
@@ -264,7 +304,7 @@ const props = defineProps<{
     display: grid;
     width: 100%;
     min-height: 56px;
-    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-columns: 22px minmax(0, 1fr);
     align-items: center;
     gap: 9px;
     padding: 8px 10px;
@@ -296,11 +336,51 @@ const props = defineProps<{
     font-size: 14px;
     line-height: 1.5;
   }
+  .version-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+  }
+  .version-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+  }
+  .storage-title {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .storage-title svg {
+    display: block;
+    flex: 0 0 auto;
+  }
   .version-list small {
+    flex: 0 0 auto;
     color: var(--reel-muted);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  .file-size {
+    display: inline-flex;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+  }
+  .file-size svg {
+    display: block;
+    flex: 0 0 auto;
   }
   .version-menu-enter-active,
   .version-menu-leave-active {
@@ -337,10 +417,11 @@ const props = defineProps<{
       padding: 0 8px;
       font-size: 12px;
     }
-    .selected-version b {
-      font-size: 9px;
-    }
     .selected-version small {
+      font-size: 10px;
+    }
+    .selected-storage {
+      max-width: 34%;
       font-size: 10px;
     }
     .action-message {

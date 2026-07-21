@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { AudioLines, Check, ChevronDown, LoaderCircle } from '@lucide/vue'
+import { AudioLines, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
 import { onClickOutside, useEventListener } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import { formatFileSize } from '@/utils/file-size'
@@ -88,7 +88,10 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
           <button v-for="version in versions" :key="version.media_id" :class="{ active: selectedMediaId === version.media_id }" type="button" @click="chooseMedia(version.media_id)">
             <span class="version-copy">
               <b>{{ version.media_name }}</b>
-              <small>{{ formatFileSize(version.media_size) }}</small>
+              <span class="version-meta">
+                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="11" />{{ version.storage_title }}</span>
+                <small class="file-size"><File :size="11" />{{ formatFileSize(version.media_size) }}</small>
+              </span>
             </span>
             <Check v-if="selectedMediaId === version.media_id" :size="15" />
           </button>
@@ -198,11 +201,11 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
   .option-list button {
     display: flex;
     width: 100%;
-    min-height: 38px;
+    min-height: 48px;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 0 10px;
+    padding: 6px 10px;
     border: 0;
     border-radius: 3px;
     background: transparent;
@@ -235,9 +238,41 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
     line-height: 1.35;
   }
   .version-copy small {
+    flex: 0 0 auto;
     color: rgba(255, 255, 255, 0.42);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
+  }
+  .version-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+  }
+  .version-meta .storage-title {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.44);
+    font-size: 10px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .version-copy .file-size {
+    display: inline-flex;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+  }
+  .storage-title svg,
+  .file-size svg {
+    display: block;
+    flex: 0 0 auto;
   }
   .option-list button svg {
     flex: 0 0 auto;

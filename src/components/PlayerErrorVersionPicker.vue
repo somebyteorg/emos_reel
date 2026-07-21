@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ArrowLeftRight, Check, ChevronDown, LoaderCircle } from '@lucide/vue'
+import { ArrowLeftRight, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
 import { onClickOutside, useEventListener } from '@vueuse/core'
 import { ref } from 'vue'
 import type { MediaVersion } from '@/api/types'
@@ -58,7 +58,10 @@ const props = defineProps<{
             @click="selectVersion(version.media_id)">
             <span>
               <b>{{ version.media_name }}</b>
-              <small>{{ formatFileSize(version.media_size) }}</small>
+              <span class="version-meta">
+                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="12" />{{ version.storage_title }}</span>
+                <small class="file-size"><File :size="12" />{{ formatFileSize(version.media_size) }}</small>
+              </span>
             </span>
             <Check v-if="version.media_id === selectedMediaId" :size="16" />
           </button>
@@ -156,9 +159,44 @@ const props = defineProps<{
     line-height: 1.35;
   }
   .error-version-list small {
+    flex: 0 0 auto;
     color: rgba(255, 255, 255, 0.42);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
+  }
+  .version-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+  }
+  .storage-title {
+    display: inline-flex;
+    min-width: 0;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 11px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .storage-title svg {
+    display: block;
+    flex: 0 0 auto;
+  }
+  .file-size {
+    display: inline-flex;
+    min-height: 14px;
+    align-items: center;
+    gap: 4px;
+    line-height: 1;
+  }
+  .file-size svg {
+    display: block;
+    flex: 0 0 auto;
   }
   .error-version-list svg {
     flex: 0 0 auto;
