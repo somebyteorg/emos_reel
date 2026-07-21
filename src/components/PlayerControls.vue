@@ -86,6 +86,7 @@ dayjs.extend(durationPlugin)
   const captionRoot = ref<HTMLElement>()
   const captionsOpen = ref(false)
   const optionMenu = ref<'quality' | 'rate' | 'audio' | null>(null)
+  const seekPreviewActive = ref(false)
   const currentTimeLabel = computed(() => dayjs.duration(Math.max(0, props.currentTime), 'seconds').format(props.currentTime >= 3600 ? 'HH:mm:ss' : 'mm:ss'))
   const durationLabel = computed(() => dayjs.duration(Math.max(0, props.duration), 'seconds').format(props.duration >= 3600 ? 'HH:mm:ss' : 'mm:ss'))
   const timeLabel = computed(() => `${currentTimeLabel.value} / ${durationLabel.value}`)
@@ -110,7 +111,7 @@ dayjs.extend(durationPlugin)
   onClickOutside(captionRoot, () => {
     captionsOpen.value = false
   })
-  watch([captionsOpen, optionMenu], ([captions, menu]) => emit('lockControls', captions || Boolean(menu)))
+  watch([captionsOpen, optionMenu, seekPreviewActive], ([captions, menu, previewActive]) => emit('lockControls', captions || Boolean(menu) || previewActive))
 </script>
 
 <template>
@@ -123,6 +124,7 @@ dayjs.extend(durationPlugin)
       :preview-disabled="captionsOpen || Boolean(optionMenu)"
       :sprites="sprites"
       @interact="emit('interact')"
+      @preview-active="seekPreviewActive = $event"
       @seek="emit('seek', $event)" />
 
     <div class="control-row">

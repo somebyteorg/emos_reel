@@ -20,6 +20,7 @@ dayjs.extend(durationPlugin)
 
   const emit = defineEmits<{
     interact: []
+    previewActive: [active: boolean]
     seek: [seconds: number]
   }>()
 
@@ -140,7 +141,10 @@ dayjs.extend(durationPlugin)
   }
 
   function hideSeekPreview() {
-    hoverPreview.value = false
+    if (hoverPreview.value) {
+      hoverPreview.value = false
+      emit('previewActive', false)
+    }
     previewStatus.value = 'idle'
     spriteRenderSequence += 1
   }
@@ -160,7 +164,10 @@ dayjs.extend(durationPlugin)
       previewWidth.value = width
       hoverTime.value = ratio * props.duration
       previewLeft.value = Math.min(rect.width - width / 2 - 4, Math.max(width / 2 + 4, ratio * rect.width))
-      hoverPreview.value = true
+      if (!hoverPreview.value) {
+        hoverPreview.value = true
+        emit('previewActive', true)
+      }
       emit('interact')
     },
     16,
@@ -198,6 +205,7 @@ dayjs.extend(durationPlugin)
   )
   onBeforeUnmount(() => {
     pointerInside = false
+    if (hoverPreview.value) emit('previewActive', false)
     spriteRenderSequence += 1
     spriteImageCache.clear()
   })
