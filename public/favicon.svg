@@ -1,0 +1,28 @@
+<!--by codex-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Emos Reel">
+    <defs>
+        <linearGradient id="bg" x1="8" y1="6" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#141414"/>
+            <stop offset=".58" stop-color="#050505"/>
+            <stop offset="1" stop-color="#0F0B05"/>
+        </linearGradient>
+        <linearGradient id="gold" x1="22" y1="18" x2="46" y2="47" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#FEF3C7"/>
+            <stop offset=".5" stop-color="#FDE68A"/>
+            <stop offset="1" stop-color="#F59E0B"/>
+        </linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.6" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+
+    <rect width="64" height="64" rx="16" fill="url(#bg)"/>
+    <rect x="13.5" y="17.5" width="37" height="29" rx="7.5" fill="none" stroke="url(#gold)" stroke-width="3"/>
+    <path d="M26.8 24.8c0-1.7 1.9-2.8 3.4-1.9l13.2 7.2c1.6.9 1.6 3.1 0 4l-13.2 7.2c-1.5.9-3.4-.2-3.4-1.9V24.8Z"
+          fill="url(#gold)" filter="url(#glow)"/>
+    <path d="M18 50h28" stroke="#FDE68A" stroke-width="2.4" stroke-linecap="round" opacity=".38"/>
+</svg>
