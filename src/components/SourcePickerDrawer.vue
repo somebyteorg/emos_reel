@@ -7,6 +7,8 @@
   import PlaybackSplitButton from '@/components/PlaybackSplitButton.vue'
   import SeasonSelect from '@/components/SeasonSelect.vue'
   import type { EpisodeInfo, MediaSource, MediaVersion, SeasonInfo } from '@/api/types'
+  import type { PlaybackCodec } from '@/utils/media-codecs'
+  import type { MediaVersionPlaybackSupport } from '@/utils/media-metadata'
 
   const props = defineProps<{
     open: boolean
@@ -33,6 +35,8 @@
     selectedPartNumber: number | null
     versions: MediaVersion[]
     selectedMediaId: string
+    selectedVersionSupport?: MediaVersionPlaybackSupport
+    supportedCodecs?: PlaybackCodec[]
     canPlay: boolean
   }>()
 
@@ -191,6 +195,8 @@
                 :menu-direction="isTv ? 'down' : 'up'"
                 :model-value="selectedMediaId"
                 :resume-seconds="selectedSource?.play_seconds"
+                :selected-support="selectedVersionSupport"
+                :supported-codecs="supportedCodecs"
                 :versions="versions"
                 @play="emit('play', $event)"
                 @update:model-value="emit('selectMedia', $event)" />

@@ -1,38 +1,25 @@
 <script lang="ts" setup>
-import dayjs from 'dayjs'
-import durationPlugin from 'dayjs/plugin/duration'
-import { AlertCircle, Check, ListVideo, LoaderCircle, LockKeyhole, Play, RefreshCw, Share2 } from '@lucide/vue'
-import {
-  useClipboard,
-  useDocumentVisibility,
-  usePreferredReducedMotion,
-  useResizeObserver,
-  useTimeoutPoll
-} from '@vueuse/core'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import AppHeader from '@/components/AppHeader.vue'
-import DescriptionDrawer from '@/components/DescriptionDrawer.vue'
-import SourcePickerDrawer from '@/components/SourcePickerDrawer.vue'
-import { getMediaSources, getRandomReel, getReelInfo } from '@/api/emos'
-import { getEpisodes, getSeasons, getVideo, getVideoDictionary, getVideoImages, imageUrl } from '@/api/todb'
-import type {
-  EpisodeInfo,
-  MediaSource,
-  ReelInfo,
-  ReelVideoRecord,
-  SeasonInfo,
-  VideoDictionary,
-  VideoImage,
-  VideoInfo
-} from '@/api/types'
-import { pickPreferredMediaVersion, useMediaSourceSelection } from '@/composables/useMediaSourceSelection'
-import { useUserBase } from '@/composables/useUserBase'
-import { useSignStore } from '@/stores/sign'
-import { cachePlayerContext } from '@/utils/player-context'
-import { calculateWatchPercent } from '@/utils/playback-progress'
+  import dayjs from 'dayjs'
+  import durationPlugin from 'dayjs/plugin/duration'
+  import { AlertCircle, Check, ListVideo, LoaderCircle, LockKeyhole, Play, RefreshCw, Share2 } from '@lucide/vue'
+  import { useClipboard, useDocumentVisibility, usePreferredReducedMotion, useResizeObserver, useTimeoutPoll } from '@vueuse/core'
+  import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+  import { useRoute, useRouter } from 'vue-router'
+  import AppHeader from '@/components/AppHeader.vue'
+  import DescriptionDrawer from '@/components/DescriptionDrawer.vue'
+  import SourcePickerDrawer from '@/components/SourcePickerDrawer.vue'
+  import { getMediaSources, getRandomReel, getReelInfo, getTodbIdByVideoId } from '@/api/emos'
+  import { getEpisodes, getSeasons, getVideo, getVideoDictionary, getVideoImages, imageUrl } from '@/api/todb'
+  import type { EpisodeInfo, MediaSource, ReelInfo, ReelVideoRecord, SeasonInfo, VideoDictionary, VideoImage, VideoInfo } from '@/api/types'
+  import { pickPreferredMediaVersion, useMediaSourceSelection } from '@/composables/useMediaSourceSelection'
+  import { useUserBase } from '@/composables/useUserBase'
+  import { useSignStore } from '@/stores/sign'
+  import type { PlaybackCodec } from '@/utils/media-codecs'
+  import { getMediaVersionPlaybackSupport } from '@/utils/media-metadata'
+  import { cachePlayerContext } from '@/utils/player-context'
+  import { calculateWatchPercent } from '@/utils/playback-progress'
 
-dayjs.extend(durationPlugin)
+  dayjs.extend(durationPlugin)
 
   const route = useRoute()
   const router = useRouter()
@@ -46,6 +33,7 @@ dayjs.extend(durationPlugin)
   const seasons = ref<SeasonInfo[]>([])
   const episodes = ref<EpisodeInfo[]>([])
   const sources = ref<MediaSource[]>([])
+  const supportedPlaybackCodecs = ref<PlaybackCodec[]>()
   const selectedSeasonNumber = ref<number | null>(null)
   const selectedEpisodeNumber = ref<number | null>(null)
   const selectedPartNumber = ref<number | null>(null)
@@ -72,9 +60,11 @@ dayjs.extend(durationPlugin)
   const documentVisibility = useDocumentVisibility()
   const preferredMotion = usePreferredReducedMotion()
   const backdropDuration = 10_000
+  const appTitle = 'EMOS REEL'
   const { copy: copyPageUrl, copied: pageUrlCopied } = useClipboard({ copiedDuring: 1800 })
 
   const forgeReelUuid = computed(() => String(route.params.forgeReelUuid || ''))
+  const pageTitle = computed(() => (video.value?.video_title ? `${video.value.video_title} - ${appTitle}` : appTitle))
   const isTv = computed(() => video.value?.video_type === 'tv')
   const backdropPaths = computed(() => {
     const paths = [imageUrl(video.value?.image_backdrop), ...images.value.map((image) => imageUrl(image.image_path))].filter((path): path is string => Boolean(path))
@@ -114,8 +104,10 @@ dayjs.extend(durationPlugin)
     episodeNumber: selectedEpisodeNumber,
     partNumber: selectedPartNumber,
     mediaId: selectedMediaId,
+    supportedCodecs: supportedPlaybackCodecs,
   })
-  const canPlay = computed(() => signStore.isSignedIn && Boolean(selectedVersion.value))
+  const selectedVersionSupport = computed(() => (selectedVersion.value ? getMediaVersionPlaybackSupport(selectedVersion.value, supportedPlaybackCodecs.value) : undefined))
+  const canPlay = computed(() => signStore.isSignedIn && Boolean(selectedVersion.value) && selectedVersionSupport.value?.playable !== false)
   const resourceResolved = computed(() => signStore.isSignedIn && !resourceLoading.value && !resourceError.value)
   const activeTitle = computed(() => selectedEpisode.value?.episode_title || video.value?.video_title || '影片')
   const pickerDescription = computed(() => selectedEpisode.value?.episode_description || video.value?.video_description || '暂无简介')
@@ -173,6 +165,46 @@ dayjs.extend(durationPlugin)
     window.location.assign(signStore.loginUrl())
   }
 
+  function canReturnToSearch() {
+    const previousRoute = window.history.state?.back
+    return typeof previousRoute === 'string' && (previousRoute === '/search' || previousRoute.startsWith('/search?'))
+  }
+
+  function openSearch() {
+    if (canReturnToSearch()) {
+      router.back()
+      return
+    }
+    void router.push({ name: 'search' })
+  }
+
+  function parseEmosVideoIdRoute(routeId: string) {
+    if (!/^[1-9]\d*$/.test(routeId)) return null
+    const videoId = Number(routeId)
+    return Number.isSafeInteger(videoId) ? videoId : null
+  }
+
+  async function getPageData(routeId: string) {
+    const videoId = parseEmosVideoIdRoute(routeId)
+    if (videoId != null) {
+      const todbId = await getTodbIdByVideoId(videoId)
+      const [videoInfo, dict] = await Promise.all([getVideo(todbId), getVideoDictionary().catch(() => undefined)])
+      const reelInfo: ReelInfo = {
+        todbv_id: todbId,
+        video_list_id: videoId,
+        video_type: videoInfo.video_type,
+        video_title: videoInfo.video_title,
+        video_runtime: videoInfo.runtime,
+        video_record: null,
+      }
+      return { reelInfo, videoInfo, dict }
+    }
+
+    const reelInfo = await getReelInfo(routeId)
+    const [videoInfo, dict] = await Promise.all([getVideo(reelInfo.todbv_id), getVideoDictionary().catch(() => undefined)])
+    return { reelInfo, videoInfo, dict }
+  }
+
   async function openPicker() {
     if (!signStore.isSignedIn) {
       beginLogin()
@@ -200,7 +232,7 @@ dayjs.extend(durationPlugin)
       }
       if (currentLoad === pickerLoadVersion) pickerReady.value = !resourceError.value
     } catch {
-      if (currentLoad === pickerLoadVersion) resourceError.value = '剧集信息暂时不可用'
+      if (currentLoad === pickerLoadVersion) resourceError.value = '暂时无法获取剧集列表'
     } finally {
       if (currentLoad === pickerLoadVersion) episodeLoading.value = false
     }
@@ -222,8 +254,12 @@ dayjs.extend(durationPlugin)
     resourceLoading.value = true
     resourceError.value = ''
     try {
-      const nextSources = await getMediaSources(reel.value.video_list_id, isTv.value && selectedSeasonNumber.value != null ? { seasonNumber: selectedSeasonNumber.value } : {})
+      const [nextSources, codecs] = await Promise.all([
+        getMediaSources(reel.value.video_list_id, isTv.value && selectedSeasonNumber.value != null ? { seasonNumber: selectedSeasonNumber.value } : {}),
+        import('@/utils/media-codecs').then(({ getSupportedPlaybackCodecs }) => getSupportedPlaybackCodecs()),
+      ])
       if (currentLoad !== resourceLoadVersion) return
+      supportedPlaybackCodecs.value = codecs
       sources.value = nextSources
 
       if (isTv.value) {
@@ -244,7 +280,7 @@ dayjs.extend(durationPlugin)
       }
     } catch {
       if (currentLoad !== resourceLoadVersion) return
-      resourceError.value = '片源信息暂时不可用'
+      resourceError.value = '暂时无法获取可播放的视频'
       sources.value = []
     } finally {
       if (currentLoad === resourceLoadVersion) resourceLoading.value = false
@@ -270,7 +306,7 @@ dayjs.extend(durationPlugin)
       selectedEpisodeNumber.value = preferredEpisode?.episode_number ?? nextEpisodes[0]?.episode_number ?? null
       await loadResources(preferredEpisode?.episode_number, preferredPartNumber)
     } catch {
-      if (currentLoad === seasonLoadVersion) resourceError.value = '本季数据暂时不可用'
+      if (currentLoad === seasonLoadVersion) resourceError.value = '暂时无法获取这一季的剧集'
     } finally {
       if (currentLoad === seasonLoadVersion) episodeLoading.value = false
     }
@@ -293,12 +329,12 @@ dayjs.extend(durationPlugin)
     seasons.value = []
     episodes.value = []
     sources.value = []
+    supportedPlaybackCodecs.value = undefined
     pickerOpen.value = false
     pickerReady.value = false
     pickerLoadVersion += 1
     try {
-      const reelInfo = await getReelInfo(forgeReelUuid.value)
-      const [videoInfo, dict] = await Promise.all([getVideo(reelInfo.todbv_id), getVideoDictionary().catch(() => undefined)])
+      const { reelInfo, videoInfo, dict } = await getPageData(forgeReelUuid.value)
       if (currentLoad !== loadVersion) return
       reel.value = reelInfo
       video.value = videoInfo
@@ -342,9 +378,11 @@ dayjs.extend(durationPlugin)
     fromStart: boolean,
   ) {
     if (!reel.value || !video.value) return
+    const routeVideoId = parseEmosVideoIdRoute(forgeReelUuid.value)
     cachePlayerContext({
       mediaId,
-      forgeReelUuid: forgeReelUuid.value,
+      videoRouteId: String(reel.value.video_list_id),
+      forgeReelUuid: routeVideoId == null ? forgeReelUuid.value : undefined,
       todbId: reel.value.todbv_id,
       videoListId: reel.value.video_list_id,
       videoType: video.value.video_type,
@@ -451,16 +489,27 @@ dayjs.extend(durationPlugin)
         pickerLoadVersion += 1
         resourceLoading.value = false
         sources.value = []
+        supportedPlaybackCodecs.value = undefined
         pickerOpen.value = false
         pickerReady.value = false
       }
     },
   )
 
+  watch(
+    pageTitle,
+    (nextTitle) => {
+      document.title = nextTitle
+    },
+    { immediate: true },
+  )
   watch([documentVisibility, preferredMotion, backdropPaths], syncBackdropRotation)
   watch(forgeReelUuid, () => void loadPage())
   onMounted(() => void loadPage())
-  onBeforeUnmount(pauseBackdropRotation)
+  onBeforeUnmount(() => {
+    pauseBackdropRotation()
+    document.title = appTitle
+  })
 </script>
 
 <template>
@@ -469,7 +518,14 @@ dayjs.extend(durationPlugin)
       <img v-if="backdrop" :key="backdrop" :src="backdrop" :style="{ '--backdrop-duration': `${backdropDuration}ms` }" alt="" aria-hidden="true" class="selection-backdrop" />
     </Transition>
     <div class="selection-shade"></div>
-    <AppHeader :avatar="signStore.user?.avatar" :signed-in="signStore.isSignedIn" :username="signStore.username" @brand="showAnotherReel" @signout="signStore.signOut" />
+    <AppHeader
+      :avatar="signStore.user?.avatar"
+      :show-search="signStore.isSignedIn"
+      :signed-in="signStore.isSignedIn"
+      :username="signStore.username"
+      @brand="showAnotherReel"
+      @search="openSearch"
+      @signout="signStore.signOut" />
 
     <section v-if="loading" class="selection-state">
       <LoaderCircle :size="24" class="animate-spin" />
@@ -554,8 +610,10 @@ dayjs.extend(durationPlugin)
         :selected-media-id="selectedMediaId"
         :selected-part-number="selectedPartNumber"
         :selected-season-number="selectedSeasonNumber"
+        :selected-version-support="selectedVersionSupport"
         :signed-in="signStore.isSignedIn"
         :sources="sources"
+        :supported-codecs="supportedPlaybackCodecs"
         :title="video.video_title"
         :versions="versions"
         @close="pickerOpen = false"

@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
 import shaka from 'shaka-player/dist/shaka-player.hls.js'
-import type { PlaybackAudioOption } from '@/types/player'
+import type { PlaybackAudioOption, PlaybackReadSource } from '@/types/player'
 import { audioTrackId, audioTrackLabel, calculateTransferSpeed, type TransferSample } from '@/utils/player-metrics'
 
 interface UseShakaPlayerOptions {
@@ -20,7 +20,10 @@ export function useShakaPlayer(options: UseShakaPlayerOptions) {
   const audioOptions = ref<PlaybackAudioOption[]>([])
   const selectedAudioId = ref('')
   const segmentDownloadBitsPerSecond = ref(0)
+  const lastCacheReadAt = ref(0)
   const lastSegmentDownloadAt = ref(0)
+  const lastSegmentReadAt = ref(0)
+  const lastSegmentSource = ref<PlaybackReadSource>()
   const transferSamples: TransferSample[] = []
   let player: shaka.Player | undefined
   let playlistUrl = ''
@@ -51,6 +54,10 @@ export function useShakaPlayer(options: UseShakaPlayerOptions) {
     if (!player) return false
     const track = player.getAudioTracks().find((item) => audioTrackId(item) === id)
     if (!track) return false
+    if (track.active) {
+      selectedAudioId.value = id
+      return true
+    }
     player.selectAudioTrack(track, 8)
     selectedAudioId.value = id
     return true
@@ -72,13 +79,18 @@ export function useShakaPlayer(options: UseShakaPlayerOptions) {
         type !== shaka.net.NetworkingEngine.RequestType.SEGMENT ||
         !requestContext?.stream ||
         !['audio', 'video'].includes(requestContext.stream.type) ||
-        requestContext.type !== shaka.net.NetworkingEngine.AdvancedRequestType.MEDIA_SEGMENT ||
-        response.fromCache ||
-        !response.timeMs ||
-        response.timeMs <= 0
+        requestContext.type !== shaka.net.NetworkingEngine.AdvancedRequestType.MEDIA_SEGMENT
       )
         return
       const endedAt = Date.now()
+      lastSegmentReadAt.value = endedAt
+      lastSegmentSource.value = response.fromCache ? 'cache' : 'network'
+      if (response.fromCache) {
+        lastCacheReadAt.value = endedAt
+        options.onStatsChanged()
+        return
+      }
+      if (!response.timeMs || response.timeMs <= 0) return
       transferSamples.push({
         bytes: response.data.byteLength,
         startedAt: endedAt - response.timeMs,
@@ -169,7 +181,10 @@ export function useShakaPlayer(options: UseShakaPlayerOptions) {
       audioOptions.value = []
       selectedAudioId.value = ''
       segmentDownloadBitsPerSecond.value = 0
+      lastCacheReadAt.value = 0
       lastSegmentDownloadAt.value = 0
+      lastSegmentReadAt.value = 0
+      lastSegmentSource.value = undefined
       transferSamples.length = 0
     }
   }
@@ -179,7 +194,10 @@ export function useShakaPlayer(options: UseShakaPlayerOptions) {
     destroy,
     getPlayer,
     getStats,
+    lastCacheReadAt,
     lastSegmentDownloadAt,
+    lastSegmentReadAt,
+    lastSegmentSource,
     load,
     segmentDownloadBitsPerSecond,
     selectAudioTrack,

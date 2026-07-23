@@ -55,6 +55,29 @@ export interface VideoInfo {
   genre_ids: Array<number | string>
 }
 
+export interface TodbVideoListItem {
+  video_id: number
+  video_type: 'movie' | 'tv'
+  video_title: string
+  video_description: string
+  video_tagline: string | null
+  origin_title: string | null
+  origin_countrys: string[]
+  original_languages: string[]
+  vote_average: number | null
+  vote_count: number | null
+  date_air: string | null
+  is_adult: boolean
+  image_poster: string | null
+}
+
+export interface TodbVideoListResponse {
+  page: number
+  page_size: number
+  total: number
+  items: TodbVideoListItem[]
+}
+
 export interface VideoImage {
   image_id: number
   image_path: string
@@ -93,12 +116,53 @@ export interface VideoDictionary {
   [key: string]: unknown
 }
 
+export interface MediaMetadataStream {
+  index?: number
+  codec_name?: string
+  codec_long_name?: string
+  profile?: string
+  codec_type?: string
+  width?: number
+  height?: number
+  coded_width?: number
+  coded_height?: number
+  pix_fmt?: string
+  color_transfer?: string
+  color_primaries?: string
+  color_space?: string
+  avg_frame_rate?: string
+  r_frame_rate?: string
+  bit_rate?: string | number
+  sample_rate?: string | number
+  channels?: number
+  channel_layout?: string
+  disposition?: Record<string, number | boolean | null | undefined>
+  tags?: Record<string, string | number | null | undefined>
+  [key: string]: unknown
+}
+
+export interface MediaMetadataFormat {
+  format_name?: string
+  format_long_name?: string
+  duration?: string | number
+  size?: string | number
+  bit_rate?: string | number
+  [key: string]: unknown
+}
+
+export interface MediaMetadata {
+  streams?: MediaMetadataStream[]
+  format?: MediaMetadataFormat
+  [key: string]: unknown
+}
+
 export interface MediaVersion {
   media_id: string
   media_name: string
   media_size: number
   media_second: number
-  storage_title: string
+  media_metadata?: MediaMetadata | null
+  storage_title: string | null
 }
 
 export interface MediaSource {
@@ -118,7 +182,7 @@ export interface MediaDetail {
   video_id: number
   video_type: 'movie' | 'tv' | null
   video_title: string | null
-  todb_id: number
+  todb_id?: number | null
   season_id: number | null
   season_number: number | null
   season_title: string | null
@@ -133,11 +197,14 @@ export interface MediaDetail {
   media_status: string
   media_file_size: number
   media_file_second: number
+  media_file_metadata?: MediaMetadata | null
+  media_metadata?: MediaMetadata | null
+  storage_title?: string | null
 }
 
 export interface ManifestSubtitle {
   type: string
-  language: string
+  language?: string
   title: string
   url: string
 }
@@ -153,7 +220,7 @@ export interface ManifestSprite {
   files: string[]
 }
 
-export interface PlaybackManifest {
+interface PlaybackManifestBase {
   forge_reel_uuid: string
   video_list_id: number
   video_season_id: number | null
@@ -164,8 +231,24 @@ export interface PlaybackManifest {
   media_name: string
   media_size: number
   media_second: number
-  m3u8_master: string
 }
+
+/**
+ * Direct file playback (MKV/MP4/…) — frontend POSTs to play_url with
+ * `play_data.data` as the JSON body and streams the response bytes.
+ */
+export type UrlPlaybackManifest = PlaybackManifestBase & {
+  play_type: 'url'
+  play_data: { play_url: string; data: unknown }
+}
+
+/** Segmented HLS playback — frontend uses Shaka Player. */
+export type M3u8PlaybackManifest = PlaybackManifestBase & {
+  play_type: 'm3u8'
+  play_data: { m3u8_master: string }
+}
+
+export type PlaybackManifest = UrlPlaybackManifest | M3u8PlaybackManifest
 
 export interface PlaybackProgressPayload {
   media_id: string

@@ -12,12 +12,12 @@ interface UsePlayerEpisodeSwitcherOptions {
   mediaId: Readonly<Ref<string>>
   currentTime: Ref<number>
   playbackRate: Ref<number>
-  videoElement: Ref<HTMLVideoElement | undefined>
   isSeries: Readonly<Ref<boolean>>
   playingSeasonNumber: Readonly<Ref<number | null>>
   playingEpisodeNumber: Readonly<Ref<number | null>>
   beforeOpen: () => void
   seekTo: (seconds: number) => void
+  play: () => void
   submitProgress: (keepalive?: boolean, targetMediaId?: string, seconds?: number, rate?: number) => void
 }
 
@@ -89,7 +89,7 @@ export function usePlayerEpisodeSwitcher(options: UsePlayerEpisodeSwitcherOption
     const [episodesResult, sourcesResult] = await Promise.allSettled([getEpisodes(currentContext.todbId, seasonNumber), getMediaSources(currentContext.videoListId, { seasonNumber })])
     if (currentLoad !== loadSequence) return
     if (episodesResult.status === 'rejected') {
-      episodeResourceError.value = '本季数据暂时不可用'
+      episodeResourceError.value = '暂时无法获取这一季的剧集'
       episodeSwitcherLoading.value = false
       episodeResourceLoading.value = false
       return
@@ -100,7 +100,7 @@ export function usePlayerEpisodeSwitcher(options: UsePlayerEpisodeSwitcherOption
     if (sourcesResult.status === 'fulfilled') {
       switcherSources.value = sourcesResult.value
     } else {
-      episodeResourceError.value = '片源信息暂时不可用'
+      episodeResourceError.value = '暂时无法获取这一季的视频'
     }
 
     const preferredExists = preferredEpisodeNumber != null && episodesResult.value.some((episode) => episode.episode_number === preferredEpisodeNumber)
@@ -129,7 +129,7 @@ export function usePlayerEpisodeSwitcher(options: UsePlayerEpisodeSwitcherOption
         switcherSeasons.value = seasons
       } catch {
         if (expectedVideoKey !== activeVideoKey) return
-        episodeResourceError.value = '季数据暂时不可用'
+        episodeResourceError.value = '暂时无法获取季度列表'
         episodeSwitcherLoading.value = false
         return
       }
@@ -164,7 +164,7 @@ export function usePlayerEpisodeSwitcher(options: UsePlayerEpisodeSwitcherOption
     if (version.media_id === options.mediaId.value) {
       if (fromStart || source.is_complete) {
         options.seekTo(0)
-        void options.videoElement.value?.play()
+        options.play()
       }
       episodeSwitcherOpen.value = false
       return

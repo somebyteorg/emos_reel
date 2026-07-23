@@ -100,7 +100,7 @@
         </template>
         <template v-else-if="resourceError">
           <AlertCircle :size="11" />
-          片源未知
+          暂时无法确认
         </template>
         <template v-else-if="episodeProgress(episode.episode_number)?.complete">
           <i class="complete-dot"></i>
@@ -116,7 +116,7 @@
         </template>
         <template v-else>
           <i></i>
-          暂无片源
+          暂时不能播放
         </template>
       </span>
       <span v-if="episodeProgress(episode.episode_number)?.started" :class="{ complete: episodeProgress(episode.episode_number)?.complete }" aria-hidden="true" class="episode-progress">

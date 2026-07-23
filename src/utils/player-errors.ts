@@ -1,10 +1,25 @@
-import type shaka from 'shaka-player'
+import type shaka from 'shaka-player/dist/shaka-player.hls'
 
-export const fallbackPlaybackErrorMessage = '播放错误，可能不支持当前设备'
+export const fallbackPlaybackErrorMessage = '这个视频暂时无法播放，可以重新载入或切换版本'
 
 export function formatUnknownPlaybackError(error: unknown, mediaId: string) {
   if (error instanceof Error) return error.message
-  return typeof error === 'string' ? error : `加载播放清单失败 请进行反馈 ${mediaId}`
+  return typeof error === 'string' ? error : `无法获取视频地址 (${mediaId})`
+}
+
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+}
+
+export function concretePlaybackErrorMessage(error: unknown) {
+  const message = errorText(error)
+  return /^libmedia .+超时$/.test(message) ? message : ''
+}
+
+export function isAudioContextGestureBlocked(error: unknown) {
+  const message = errorText(error)
+  // 浏览器要求 AudioContext 必须由用户手势恢复，这类提示不代表视频资源不可播。
+  return /AudioContext was not allowed to start/i.test(message) || /must be resumed .* user gesture/i.test(message)
 }
 
 export function playbackErrorUserMessage(error: shaka.util.Error) {

@@ -41,6 +41,7 @@ dayjs.extend(durationPlugin)
     muted: boolean
     subtitles: SubtitleOption[]
     selectedSubtitle: string | number
+    subtitleAppearanceEnabled: boolean
     subtitleFontSize: SubtitleFontSize
     subtitleBackgroundMode: SubtitleBackgroundMode
     subtitleBackgroundOpacity: number
@@ -55,8 +56,10 @@ dayjs.extend(durationPlugin)
     selectedMediaId: string
     switchingVersion: boolean
     playbackRate: number
+    debugMode: boolean
     audioTracks: PlaybackAudioOption[]
     selectedAudio: string
+    dolbyVisionSupported: boolean | null
     showNowPlaying: boolean
     nowPlayingTitle: string
     nowPlayingMeta: string
@@ -124,8 +127,8 @@ dayjs.extend(durationPlugin)
       :preview-disabled="captionsOpen || Boolean(optionMenu)"
       :sprites="sprites"
       @interact="emit('interact')"
-      @preview-active="seekPreviewActive = $event"
-      @seek="emit('seek', $event)" />
+      @seek="emit('seek', $event)"
+      @preview-active="seekPreviewActive = $event" />
 
     <div class="control-row">
       <div class="control-group control-primary">
@@ -153,6 +156,8 @@ dayjs.extend(durationPlugin)
         <div class="playback-options">
           <PlayerOptionControls
             :audio-tracks="audioTracks"
+            :debug-mode="debugMode"
+            :dolby-vision-supported="dolbyVisionSupported"
             :open="optionMenu"
             :playback-rate="playbackRate"
             :selected-audio="selectedAudio"
@@ -179,12 +184,12 @@ dayjs.extend(durationPlugin)
                     <span>关闭字幕</span>
                     <Check v-if="selectedSubtitle === 'off'" :size="15" />
                   </button>
-                  <button v-for="option in subtitles" :key="option.track.id" :class="{ active: selectedSubtitle === option.track.id }" type="button" @click="chooseSubtitle(option)">
+                  <button v-for="option in subtitles" :key="option.id" :class="{ active: selectedSubtitle === option.id }" type="button" @click="chooseSubtitle(option)">
                     <span>{{ option.title }}</span>
-                    <Check v-if="selectedSubtitle === option.track.id" :size="15" />
+                    <Check v-if="selectedSubtitle === option.id" :size="15" />
                   </button>
                 </div>
-                <section class="caption-appearance">
+                <section v-if="subtitleAppearanceEnabled" class="caption-appearance">
                   <div class="caption-setting">
                     <span>字号</span>
                     <div class="caption-segments four-options">

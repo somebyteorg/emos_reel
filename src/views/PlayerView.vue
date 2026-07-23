@@ -1,27 +1,31 @@
 <script lang="ts" setup>
-  import { Activity, AlertCircle, ChevronLeft, ExternalLink, House, ListVideo, LoaderCircle, LockKeyhole, Play, RotateCw, Share2 } from '@lucide/vue'
-  import { useEventListener, useIntervalFn, useTimeoutFn } from '@vueuse/core'
+  import { Activity, AlertCircle, ChevronLeft, ListVideo, LoaderCircle, LockKeyhole, Play, RotateCw, Share2 } from '@lucide/vue'
+  import { useEventListener, useIntervalFn, useSessionStorage, useTimeoutFn } from '@vueuse/core'
   import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import PlayerControls from '@/components/PlayerControls.vue'
   import PlayerDebugPanel from '@/components/PlayerDebugPanel.vue'
   import PlayerEndOverlay from '@/components/PlayerEndOverlay.vue'
-  import PlayerErrorVersionPicker from '@/components/PlayerErrorVersionPicker.vue'
+  import PlayerErrorOverlay from '@/components/PlayerErrorOverlay.vue'
   import PlayerEpisodeSwitcher from '@/components/PlayerEpisodeSwitcher.vue'
   import ShareDialog from '@/components/ShareDialog.vue'
+  import { usePlaybackEngine } from '@/composables/usePlaybackEngine'
   import { usePlaybackProgress } from '@/composables/usePlaybackProgress'
+  import { usePlayerBuffering } from '@/composables/usePlayerBuffering'
+  import { usePlayerContextHydration } from '@/composables/usePlayerContextHydration'
+  import { usePlayerDebug } from '@/composables/usePlayerDebug'
+  import { usePlayerKeyboardShortcuts } from '@/composables/usePlayerKeyboardShortcuts'
   import { usePlayerEpisodeSwitcher } from '@/composables/usePlayerEpisodeSwitcher'
   import { usePlayerMediaSession } from '@/composables/usePlayerMediaSession'
-  import { useShakaPlayer } from '@/composables/useShakaPlayer'
+  import { usePlayerPresentation } from '@/composables/usePlayerPresentation'
   import { type SubtitlePreference, usePlayerSubtitles } from '@/composables/usePlayerSubtitles'
-  import { getMediaDetails, getMediaSources, getPlaybackManifest, PlaybackManifestError } from '@/api/emos'
-  import { getEpisode, getVideo, imageUrl } from '@/api/todb'
+  import { getPlaybackManifest, PlaybackManifestError } from '@/api/emos'
   import type { EpisodeInfo, MediaDetail, MediaVersion, PlaybackManifest, VideoInfo } from '@/api/types'
   import { useSignStore } from '@/stores/sign'
-  import type { PlayerBufferedRange, PlayerDebugSnapshot } from '@/types/player'
-  import { getSupportedPlaybackCodecs, hasRequiredPlaybackCodecs } from '@/utils/media-codecs'
-  import { fallbackPlaybackErrorMessage, formatUnknownPlaybackError, playbackErrorUserMessage } from '@/utils/player-errors'
-  import { formatBitrate, formatTransferSpeed } from '@/utils/player-metrics'
+  import type { PlaybackDecoderMode } from '@/types/player'
+  import { getDolbyVisionPlaybackSupport, getSupportedPlaybackCodecs } from '@/utils/media-codecs'
+  import { isDolbyVisionMediaVersion } from '@/utils/media-metadata'
+  import { concretePlaybackErrorMessage, fallbackPlaybackErrorMessage, formatUnknownPlaybackError } from '@/utils/player-errors'
   import { cachePlayerContext, getPlayerContext, type PlayerContext, updatePlayerProgress } from '@/utils/player-context'
 
   const route = useRoute()
@@ -29,6 +33,7 @@
   const signStore = useSignStore()
   const mediaId = computed(() => String(route.params.mediaId || ''))
   const videoElement = ref<HTMLVideoElement>()
+  const libmediaContainer = ref<HTMLDivElement>()
   const playerShell = ref<HTMLElement>()
   const context = ref<PlayerContext>()
   const detail = ref<MediaDetail>()
@@ -36,25 +41,21 @@
   const manifest = ref<PlaybackManifest>()
   const manifestReady = ref(false)
   const loading = ref(false)
+  const loadingStatus = ref('正在准备播放器')
   const ready = ref(false)
   const errorMessage = ref('')
   const latestPlaybackErrorMessage = ref('')
   const latestPlaybackErrorUserMessage = ref('')
   const manifestNotFound = ref(false)
   const dataWarning = ref('')
-  const paused = ref(true)
-  const currentTime = ref(0)
-  const duration = ref(0)
-  const bufferedRanges = ref<PlayerBufferedRange[]>([])
-  const volume = ref(1)
-  const muted = ref(false)
+  const decoderMode = useSessionStorage<PlaybackDecoderMode>('emos_reel.player.decoder_mode', 'webcodecs')
   const controlsVisible = ref(true)
   const controlsLocked = ref(false)
   const playbackVersions = ref<MediaVersion[]>([])
+  const dolbyVisionPlaybackSupported = ref<boolean | null>(null)
+  const hasDolbyVisionVersion = computed(() => playbackVersions.value.some(isDolbyVisionMediaVersion))
   const versionSwitching = ref(false)
-  const playbackRate = ref(1)
   const debugVisible = ref(false)
-  const bufferingVisible = ref(false)
   const playbackEnded = ref(false)
   const endOverlayDismissed = ref(false)
   const endNextResolving = ref(false)
@@ -62,94 +63,153 @@
   const nextEpisodeCountdown = ref(0)
   const shareOpen = ref(false)
   const fullscreen = ref(false)
-  const canPictureInPicture = ref(false)
   let loadSequence = 0
   let nextLoadShouldAutoplay = true
   let nextSubtitlePreference: SubtitlePreference
   let nextAudioPreference = ''
+  let dolbyVisionSupportRequested = false
+  const manifestFallbackMessage = '暂时无法获取视频地址，请稍后重试'
+  let handleDebugStatsChanged = () => {}
+  let handleBufferingStart = () => {}
+  let handleBufferingEnd = () => {}
+  let stopBufferingNotice = () => {}
 
-  const baseTitle = computed(() => context.value?.videoTitle || videoInfo.value?.video_title || detail.value?.video_title || 'EMOS REEL')
-  const title = computed(() => {
-    const segments = [baseTitle.value]
-    const seasonNumber = context.value?.seasonNumber ?? detail.value?.season_number
-    const episodeNumber = context.value?.episodeNumber ?? detail.value?.episode_number
-    if (seasonNumber != null) segments.push(`第 ${seasonNumber} 季`)
-    if (episodeNumber != null) segments.push(`第 ${episodeNumber} 集`)
-    return segments.join(' · ')
-  })
-  const episodeLine = computed(() => {
-    const segments: string[] = []
-    const episodeTitle = context.value?.episodeTitle || detail.value?.episode_title
-    const partNumber = context.value?.partNumber ?? detail.value?.part_number
-    if (episodeTitle) segments.push(episodeTitle)
-    if (partNumber != null) segments.push(`分段 ${partNumber}`)
-    return segments.join(' · ')
-  })
-  const mediaName = computed(() => context.value?.mediaName || manifest.value?.media_name || detail.value?.media_name || '')
-  const isSeries = computed(() => (context.value?.videoType || videoInfo.value?.video_type || detail.value?.video_type) === 'tv')
-  const playingSeasonNumber = computed(() => context.value?.seasonNumber ?? detail.value?.season_number ?? null)
-  const playingEpisodeNumber = computed(() => context.value?.episodeNumber ?? detail.value?.episode_number ?? null)
-  const shareTitle = computed(() => {
-    if (!isSeries.value || playingSeasonNumber.value == null || playingEpisodeNumber.value == null) {
-      return baseTitle.value
-    }
-    const season = String(playingSeasonNumber.value).padStart(2, '0')
-    const episode = String(playingEpisodeNumber.value).padStart(2, '0')
-    return `${baseTitle.value} · S${season}E${episode}`
-  })
-  const playerLogo = computed(() => context.value?.logo || imageUrl(videoInfo.value?.image_logo, 'w500') || '')
-  const showNowPlaying = computed(() => isSeries.value && Boolean(playerLogo.value))
-  const nowPlayingTitle = computed(() => {
-    if (!isSeries.value) return baseTitle.value
-    return context.value?.episodeTitle || detail.value?.episode_title || (playingEpisodeNumber.value != null ? `第 ${playingEpisodeNumber.value} 集` : baseTitle.value)
-  })
-  const nowPlayingMeta = computed(() => {
-    if (!isSeries.value) return ''
-    const segments: string[] = []
-    if (playingSeasonNumber.value != null) segments.push(`第 ${playingSeasonNumber.value} 季`)
-    if (playingEpisodeNumber.value != null) segments.push(`第 ${playingEpisodeNumber.value} 集`)
-    const partNumber = context.value?.partNumber ?? detail.value?.part_number
-    if (partNumber != null) segments.push(`分段 ${partNumber}`)
-    return segments.join(' · ')
+  const {
+    baseTitle,
+    isSeries,
+    mediaName,
+    mediaSessionArtist,
+    nowPlayingMeta,
+    nowPlayingTitle,
+    playerBackdropSource,
+    playerLogoSource,
+    playingEpisodeNumber,
+    playingSeasonNumber,
+    shareTitle,
+    showNowPlaying,
+    storageLocation,
+    title,
+  } = usePlayerPresentation({
+    context,
+    detail,
+    mediaId,
+    manifest,
+    playbackVersions,
+    videoInfo,
   })
   const endNextEpisodeLabel = computed(() => (endNextEpisode.value ? `第 ${endNextEpisode.value.episode_number} 集` : ''))
-  const mediaSessionArtist = computed(() => episodeLine.value || mediaName.value)
-  const mediaSessionArtwork = computed(() => context.value?.backdrop)
-  const debugSnapshot = ref<PlayerDebugSnapshot>({
-    downloadSpeed: '--',
-    estimatedBandwidth: '--',
-    streamBandwidth: '--',
-    bufferAhead: '--',
-    viewport: '--',
-    resolution: '--',
-    droppedFrames: '--',
-    codecs: '--',
-    mediaId: '',
-    mediaName: '',
-  })
   const {
     audioOptions,
-    destroy: destroyShakaPlayer,
-    getPlayer,
-    getStats,
+    bufferedRanges,
+    canPictureInPicture,
+    currentTime,
+    destroy: destroyPlaybackEngine,
+    duration,
+    engineKind,
+    getDebugStats,
+    getLibmediaPlayer,
+    getShakaPlayer,
+    lastCacheReadAt,
+    lastMediaReadAt,
     lastSegmentDownloadAt,
-    load: loadShakaPlayer,
+    load: loadPlaybackEngine,
+    mediaReadSource,
+    muted,
+    pause: pauseMedia,
+    paused,
+    play: playMedia,
+    playbackRate,
+    playableBufferAhead,
+    resetStoredMediaRanges,
+    seek: seekMedia,
+    seeking,
     segmentDownloadBitsPerSecond,
-    selectAudioTrack: selectShakaAudioTrack,
+    selectAudioTrack: selectEngineAudioTrack,
     selectedAudioId,
-  } = useShakaPlayer({
+    setPlaybackRate,
+    setVolume,
+    streamCatchingUp,
+    streamCatchUpSeconds,
+    toggleMute: toggleEngineMute,
+    togglePictureInPicture: toggleEnginePictureInPicture,
+    togglePlayback: toggleEnginePlayback,
+    volume,
+  } = usePlaybackEngine({
     videoElement,
+    libmediaContainer,
+    decoderMode,
     getToken: () => signStore.user_token,
-    onError: (playbackError, critical) => {
-      latestPlaybackErrorMessage.value = playbackError.message || `Shaka Error ${playbackError.code}`
-      latestPlaybackErrorUserMessage.value = playbackErrorUserMessage(playbackError)
-      if (ready.value && critical) errorMessage.value = latestPlaybackErrorUserMessage.value
+    onCanPlay: handlePlaybackCanPlay,
+    onEnded: () => {
+      void handlePlaybackEnded()
     },
-    onStatsChanged: () => {
-      if (debugVisible.value) updateDebugSnapshot()
+    onError: ({ technicalMessage, userMessage, critical }) => {
+      latestPlaybackErrorMessage.value = technicalMessage
+      latestPlaybackErrorUserMessage.value = userMessage
+      if (!critical) return
+      errorMessage.value = userMessage
+      if (loading.value) {
+        loading.value = false
+        versionSwitching.value = false
+      }
     },
+    onLoadStatus: (status) => {
+      loadingStatus.value = status
+    },
+    onPause: handlePlaybackPause,
+    onPlaying: handlePlaybackPlaying,
+    onSeeked: handlePlaybackSeeked,
+    onStatsChanged: () => handleDebugStatsChanged(),
+    onTimeUpdate: handleTimeUpdate,
+    onWaiting: () => handleBufferingStart(),
   })
   const {
+    cacheClearing,
+    clearDebugMediaCache,
+    debugSnapshot,
+    handleStatsChanged,
+    stop: stopDebugUpdates,
+  } = usePlayerDebug({
+    visible: debugVisible,
+    playerShell,
+    mediaId,
+    mediaName,
+    storageLocation,
+    lastCacheReadAt,
+    lastMediaReadAt,
+    lastSegmentDownloadAt,
+    mediaReadSource,
+    segmentDownloadBitsPerSecond,
+    streamCatchingUp,
+    streamCatchUpSeconds,
+    getDebugStats,
+    resetStoredMediaRanges,
+  })
+  handleDebugStatsChanged = handleStatsChanged
+  const {
+    bufferingDetail,
+    bufferingVisible,
+    handleBufferingEnd: handleBufferingEndImpl,
+    handleBufferingStart: handleBufferingStartImpl,
+    stopBufferingNotice: stopBufferingNoticeImpl,
+  } = usePlayerBuffering({
+    ready,
+    paused,
+    seeking,
+    bufferAhead: playableBufferAhead,
+    lastCacheReadAt,
+    lastMediaReadAt,
+    lastSegmentDownloadAt,
+    mediaReadSource,
+    segmentDownloadBitsPerSecond,
+    streamCatchingUp,
+    streamCatchUpSeconds,
+  })
+  handleBufferingEnd = handleBufferingEndImpl
+  handleBufferingStart = handleBufferingStartImpl
+  stopBufferingNotice = stopBufferingNoticeImpl
+  const {
+    subtitleError,
     capturePreference: captureSubtitlePreference,
     loadWhenPlayable: loadSubtitlesWhenPlayable,
     queueLoad: queueSubtitleLoad,
@@ -161,7 +221,12 @@
     subtitleFontSize,
     subtitleOptions,
     subtitlePosition,
-  } = usePlayerSubtitles({ videoElement, getPlayer })
+  } = usePlayerSubtitles({
+    videoElement,
+    engineKind,
+    getShakaPlayer,
+    getLibmediaPlayer,
+  })
   const {
     markPlaybackSuccessful,
     pause: pauseProgressUpdates,
@@ -202,7 +267,6 @@
     mediaId,
     currentTime,
     playbackRate,
-    videoElement,
     isSeries,
     playingSeasonNumber,
     playingEpisodeNumber,
@@ -210,6 +274,9 @@
       shareOpen.value = false
     },
     seekTo,
+    play: () => {
+      runPlaybackAction(playMedia(), '暂时无法播放，请重试')
+    },
     submitProgress: submitLatestPlaybackProgress,
   })
   const overlayOpen = computed(() => shareOpen.value || episodeSwitcherOpen.value)
@@ -218,15 +285,22 @@
     syncPosition: syncMediaSessionPosition,
     updatePosition: updateMediaSessionPosition,
   } = usePlayerMediaSession({
-    videoElement,
     ready,
     paused,
+    currentTime,
+    duration,
+    playbackRate,
     title,
     artist: mediaSessionArtist,
-    artwork: mediaSessionArtwork,
     canPrevious: canPreviousEpisode,
     canNext: canNextEpisode,
     seekTo,
+    play: () => {
+      runPlaybackAction(playMedia(), '暂时无法播放，请重试')
+    },
+    pause: () => {
+      runPlaybackAction(pauseMedia(), '暂时无法暂停，请重试')
+    },
     playPrevious: () => {
       void switchAdjacentEpisode(-1)
     },
@@ -241,13 +315,6 @@
     2600,
     { immediate: false },
   )
-  const { start: startBufferingNotice, stop: stopBufferingNotice } = useTimeoutFn(
-    () => {
-      if (ready.value && !paused.value) bufferingVisible.value = true
-    },
-    450,
-    { immediate: false },
-  )
   const { pause: pauseNextCountdown, resume: resumeNextCountdown } = useIntervalFn(
     () => {
       if (nextEpisodeCountdown.value <= 1) {
@@ -260,7 +327,18 @@
     1000,
     { immediate: false },
   )
-  const { pause: pauseDebugUpdates, resume: resumeDebugUpdates } = useIntervalFn(updateDebugSnapshot, 1000, { immediate: false })
+  function isCurrentLoad(expectedLoad: number, expectedMediaId = mediaId.value) {
+    return expectedLoad === loadSequence && mediaId.value === expectedMediaId
+  }
+  const { hydrateContext, needsArtworkRefresh, requestPlaybackDetails, restoreContextArtwork, restorePlaybackVersions } = usePlayerContextHydration({
+    context,
+    dataWarning,
+    detail,
+    isCurrentLoad,
+    mediaId,
+    playbackVersions,
+    videoInfo,
+  })
 
   function beginLogin() {
     signStore.rememberReturnPath(route.fullPath)
@@ -279,65 +357,17 @@
     else if (!paused.value) startHideTimer()
   }
 
-  async function requestPlaybackVersions(videoListId: number, expectedMediaId: string, seasonNumber: number | null, episodeNumber: number | null, partNumber: number | null) {
-    const sources = await getMediaSources(videoListId, {
-      seasonNumber: seasonNumber ?? undefined,
-      episodeNumber: episodeNumber ?? undefined,
-      partNumber: partNumber ?? undefined,
-    })
-    return sources.find((source) => source.versions.some((version) => version.media_id === expectedMediaId))?.versions ?? []
-  }
-
-  async function restorePlaybackVersions(nextContext: PlayerContext, expectedLoad: number) {
-    try {
-      const versions = await requestPlaybackVersions(nextContext.videoListId, nextContext.mediaId, nextContext.seasonNumber, nextContext.episodeNumber, nextContext.partNumber)
-      if (expectedLoad !== loadSequence || mediaId.value !== nextContext.mediaId) return
-      playbackVersions.value = versions
-      if (!versions.length) {
-        dataWarning.value = '当前资源未返回可切换的播放版本。'
-        return
-      }
-      const restoredContext = { ...nextContext, ...context.value, versions }
-      context.value = restoredContext
-      cachePlayerContext(restoredContext)
-    } catch {
-      if (expectedLoad === loadSequence) dataWarning.value = '播放版本暂时无法恢复。'
-    }
-  }
-
-  async function restoreContextLogo(nextContext: PlayerContext, expectedLoad: number) {
-    try {
-      const info = await getVideo(nextContext.todbId)
-      if (expectedLoad !== loadSequence || mediaId.value !== nextContext.mediaId) return
-      videoInfo.value = info
-      const restoredContext = {
-        ...nextContext,
-        ...context.value,
-        logo: imageUrl(info.image_logo, 'w500') ?? null,
-      }
-      context.value = restoredContext
-      cachePlayerContext(restoredContext)
-    } catch {
-      if (expectedLoad === loadSequence) {
-        const restoredContext = { ...nextContext, ...context.value, logo: null }
-        context.value = restoredContext
-        cachePlayerContext(restoredContext)
-      }
-    }
-  }
-
   async function switchPlaybackVersion(targetMediaId: string) {
     if (targetMediaId === mediaId.value || versionSwitching.value) return
     const targetVersion = playbackVersions.value.find((version) => version.media_id === targetMediaId)
     const currentContext = context.value
-    const video = videoElement.value
-    if (!targetVersion || !currentContext || !video) return
+    if (!targetVersion || !currentContext) return
 
     updatePlayerProgress(mediaId.value, currentTime.value)
     submitLatestPlaybackProgress(false, mediaId.value, currentTime.value, playbackRate.value)
-    nextLoadShouldAutoplay = Boolean(errorMessage.value) || !video.paused
+    nextLoadShouldAutoplay = Boolean(errorMessage.value) || !paused.value
     nextSubtitlePreference = captureSubtitlePreference()
-    nextAudioPreference = selectedAudioId.value
+    nextAudioPreference = engineKind.value === 'shaka' ? selectedAudioId.value : ''
     cachePlayerContext({
       ...currentContext,
       mediaId: targetVersion.media_id,
@@ -357,60 +387,50 @@
   }
 
   function selectPlaybackRate(rate: number) {
-    const video = videoElement.value
-    if (!video) return
-    video.playbackRate = rate
-    playbackRate.value = rate
+    setPlaybackRate(rate)
     syncMediaSessionPosition()
+    requestThrottledProgressUpdate()
   }
 
   function selectAudioTrack(id: string) {
-    if (selectShakaAudioTrack(id)) showControls()
+    runPlaybackAction(
+      selectEngineAudioTrack(id).then((selected) => {
+        if (selected) showControls()
+      }),
+      '暂时无法切换声音，请重试',
+    )
   }
 
-  function getBufferAhead(video: HTMLVideoElement) {
-    for (let index = 0; index < video.buffered.length; index += 1) {
-      if (video.buffered.start(index) <= video.currentTime && video.buffered.end(index) >= video.currentTime) {
-        return Math.max(0, video.buffered.end(index) - video.currentTime)
-      }
-    }
-    return 0
-  }
-
-  function updateDebugSnapshot() {
-    const video = videoElement.value
-    const shell = playerShell.value
-    const stats = getStats()
-    if (!video || !stats) return
-    const width = Number.isFinite(stats.width) ? stats.width : video.videoWidth
-    const height = Number.isFinite(stats.height) ? stats.height : video.videoHeight
-    const decodedFrames = Number.isFinite(stats.decodedFrames) ? stats.decodedFrames : 0
-    const droppedFrames = Number.isFinite(stats.droppedFrames) ? stats.droppedFrames : 0
-    const droppedPercent = decodedFrames > 0 ? (droppedFrames / decodedFrames) * 100 : 0
-    const recentDownloadSpeed = Date.now() - lastSegmentDownloadAt.value <= 12_000 ? segmentDownloadBitsPerSecond.value : 0
-    debugSnapshot.value = {
-      downloadSpeed: formatTransferSpeed(recentDownloadSpeed),
-      estimatedBandwidth: formatTransferSpeed(stats.estimatedBandwidth),
-      streamBandwidth: formatBitrate(stats.streamBandwidth),
-      bufferAhead: `${getBufferAhead(video).toFixed(1)} 秒`,
-      viewport: shell ? `${shell.clientWidth} × ${shell.clientHeight}` : '--',
-      resolution: width > 0 && height > 0 ? `${width} × ${height}` : '--',
-      droppedFrames: `${droppedFrames} / ${decodedFrames} (${droppedPercent.toFixed(2)}%)`,
-      codecs: stats.currentCodecs || '--',
-      mediaId: mediaId.value,
-      mediaName: mediaName.value || '--',
+  function selectDecoderMode(mode: PlaybackDecoderMode) {
+    if (decoderMode.value === mode) return
+    decoderMode.value = mode
+    const shouldReload = engineKind.value === 'libmedia' || manifest.value?.play_type === 'url'
+    dataWarning.value = mode === 'webcodecs' ? '已切到硬解' : '已切到软解'
+    if (shouldReload) dataWarning.value += '，正在重新载入当前视频'
+    if (shouldReload) {
+      nextLoadShouldAutoplay = Boolean(errorMessage.value) || !paused.value
+      void loadPlayback()
     }
   }
 
-  function handleBufferingStart() {
-    if (!ready.value || paused.value) return
-    stopBufferingNotice()
-    startBufferingNotice()
+  async function ensureDolbyVisionPlaybackSupport() {
+    if (dolbyVisionSupportRequested) return
+    dolbyVisionSupportRequested = true
+    dolbyVisionPlaybackSupported.value = await getDolbyVisionPlaybackSupport()
   }
 
-  function handleBufferingEnd() {
-    stopBufferingNotice()
-    bufferingVisible.value = false
+  function handlePlaybackActionError(error: unknown, userMessage: string) {
+    const technicalMessage = formatUnknownPlaybackError(error, mediaId.value)
+    if (errorMessage.value && latestPlaybackErrorMessage.value === technicalMessage) return
+    latestPlaybackErrorMessage.value = technicalMessage
+    latestPlaybackErrorUserMessage.value = userMessage
+    errorMessage.value = userMessage
+  }
+
+  function runPlaybackAction(action: Promise<unknown>, userMessage: string) {
+    void action.catch((error) => {
+      handlePlaybackActionError(error, userMessage)
+    })
   }
 
   function cancelNextCountdown() {
@@ -419,7 +439,6 @@
   }
 
   async function handlePlaybackEnded() {
-    updatePlaybackState()
     pauseProgressUpdates()
     submitLatestPlaybackProgress()
     handleBufferingEnd()
@@ -473,57 +492,24 @@
     playbackEnded.value = false
     endOverlayDismissed.value = false
     seekTo(0)
-    void videoElement.value?.play()
+    runPlaybackAction(playMedia(), '暂时无法播放，请重试')
   }
 
   function togglePlayback() {
-    const video = videoElement.value
-    if (!video || !ready.value) return
+    if (!ready.value) return
     if (playbackEnded.value) {
       replayCurrent()
       return
     }
-    if (video.paused) void video.play()
-    else video.pause()
+    runPlaybackAction(toggleEnginePlayback(), paused.value ? '暂时无法播放，请重试' : '暂时无法暂停，请重试')
   }
 
   function toggleMute() {
-    const video = videoElement.value
-    if (!video) return
-    video.muted = !video.muted
-    muted.value = video.muted
+    toggleEngineMute()
   }
 
   function changeVolume(nextVolume: number) {
-    const video = videoElement.value
-    if (!video) return
-    video.volume = nextVolume
-    video.muted = nextVolume === 0
-    volume.value = nextVolume
-    muted.value = video.muted
-  }
-
-  function updatePlaybackState() {
-    const video = videoElement.value
-    if (!video) return
-    currentTime.value = video.currentTime || 0
-    duration.value = Number.isFinite(video.duration) ? video.duration : 0
-    paused.value = video.paused
-    volume.value = video.volume
-    muted.value = video.muted
-    playbackRate.value = video.playbackRate
-    bufferedRanges.value =
-      duration.value > 0
-        ? Array.from({ length: video.buffered.length }, (_, index) => ({
-            start: Math.min(100, Math.max(0, (video.buffered.start(index) / duration.value) * 100)),
-            end: Math.min(100, Math.max(0, (video.buffered.end(index) / duration.value) * 100)),
-          }))
-        : []
-    if (video.paused) handleBufferingEnd()
-  }
-
-  function handlePlaybackPlay() {
-    updatePlaybackState()
+    setVolume(nextVolume)
   }
 
   function handlePlaybackPlaying() {
@@ -532,39 +518,31 @@
   }
 
   function handlePlaybackPause() {
-    updatePlaybackState()
+    handleBufferingEnd()
     pauseProgressUpdates()
     requestThrottledProgressUpdate()
   }
 
-  function handlePlaybackRateChange() {
-    updatePlaybackState()
-    requestThrottledProgressUpdate()
-  }
-
   function handlePlaybackSeeked() {
-    updatePlaybackState()
+    handleBufferingEnd()
     requestThrottledProgressUpdate()
   }
 
   function handleTimeUpdate() {
-    const video = videoElement.value
-    if (!video) return
-    currentTime.value = video.currentTime
     persistContextProgress()
     updateMediaSessionPosition()
   }
 
   function seekTo(seconds: number) {
-    const video = videoElement.value
-    if (!video) return
     if (seconds < duration.value - 0.5) {
       playbackEnded.value = false
       endOverlayDismissed.value = false
       cancelNextCountdown()
     }
-    video.currentTime = seconds
-    currentTime.value = video.currentTime
+    void seekMedia(seconds).catch((error) => {
+      handleBufferingEnd()
+      latestPlaybackErrorMessage.value = formatUnknownPlaybackError(error, mediaId.value)
+    })
     syncMediaSessionPosition()
     requestThrottledProgressUpdate()
   }
@@ -576,65 +554,18 @@
   }
 
   async function togglePictureInPicture() {
-    const video = videoElement.value
-    if (!video || !document.pictureInPictureEnabled) return
-    if (document.pictureInPictureElement) await document.exitPictureInPicture()
-    else await video.requestPictureInPicture()
+    await toggleEnginePictureInPicture()
   }
 
   function handlePlaybackCanPlay() {
     handleBufferingEnd()
-    loadSubtitlesWhenPlayable()
+    if (engineKind.value === 'shaka') loadSubtitlesWhenPlayable()
   }
 
-  async function hydrateContext(details: MediaDetail[], playbackManifest: PlaybackManifest, expectedLoad: number) {
-    if (context.value) return
-    const expectedMediaId = mediaId.value
-    const mediaDetail = details.find((item) => item.media_id === mediaId.value) ?? details[0]
-    detail.value = mediaDetail
-    if (!mediaDetail?.todb_id) {
-      dataWarning.value = '资源缺少 TODB 关联，影片信息无法恢复。'
-      return
-    }
-    try {
-      const [info, versions] = await Promise.all([
-        getVideo(mediaDetail.todb_id),
-        requestPlaybackVersions(mediaDetail.video_id, mediaId.value, mediaDetail.season_number, mediaDetail.episode_number, mediaDetail.part_number).catch(() => []),
-      ])
-      videoInfo.value = info
-      let episodeTitle = mediaDetail.episode_title
-      if (info.video_type === 'tv') {
-        if (mediaDetail.season_number == null || mediaDetail.episode_number == null) {
-          dataWarning.value = '剧集资源缺少季集编号，关联数据异常。'
-        } else if (!episodeTitle) {
-          episodeTitle = (await getEpisode(mediaDetail.todb_id, mediaDetail.season_number, mediaDetail.episode_number).catch(() => undefined))?.episode_title ?? null
-        }
-      }
-      if (expectedLoad !== loadSequence || mediaId.value !== expectedMediaId) return
-      const restored: PlayerContext = {
-        mediaId: mediaId.value,
-        forgeReelUuid: playbackManifest.forge_reel_uuid,
-        todbId: mediaDetail.todb_id,
-        videoListId: mediaDetail.video_id,
-        videoType: info.video_type,
-        videoTitle: info.video_title,
-        logo: imageUrl(info.image_logo, 'w500') ?? null,
-        backdrop: imageUrl(info.image_backdrop) ?? null,
-        seasonNumber: mediaDetail.season_number,
-        episodeNumber: mediaDetail.episode_number,
-        episodeTitle,
-        partNumber: mediaDetail.part_number,
-        mediaName: mediaDetail.media_name,
-        versions,
-        resumeSeconds: null,
-      }
-      playbackVersions.value = versions
-      if (!versions.length && !dataWarning.value) dataWarning.value = '当前资源未返回可切换的播放版本。'
-      context.value = restored
-      cachePlayerContext(restored)
-    } catch {
-      dataWarning.value = '影片元数据暂时无法恢复。'
-    }
+  function manifestErrorMessage(error: PlaybackManifestError) {
+    if (error.responseMessage) return error.responseMessage
+    if (error.status === 404) return '没有找到这个视频'
+    return manifestFallbackMessage
   }
 
   async function destroyPlayer() {
@@ -643,7 +574,7 @@
     resetProgressUpdates()
     handleBufferingEnd()
     cancelNextCountdown()
-    await destroyShakaPlayer()
+    await destroyPlaybackEngine()
   }
 
   async function loadPlayback() {
@@ -666,70 +597,76 @@
     manifestNotFound.value = false
     dataWarning.value = ''
     loading.value = true
+    loadingStatus.value = '正在确认当前设备能否播放'
     if (!signStore.isSignedIn) {
       loading.value = false
       return
     }
     try {
+      const detailsRequest = context.value ? Promise.resolve<MediaDetail[]>([]) : requestPlaybackDetails(currentLoad, mediaId.value)
       const supportedCodecs = await getSupportedPlaybackCodecs()
       if (currentLoad !== loadSequence) return
-      if (!hasRequiredPlaybackCodecs(supportedCodecs)) {
-        errorMessage.value = '暂不支持此设备'
-        return
-      }
+      loadingStatus.value = '正在获取视频地址'
       const playbackManifest = await getPlaybackManifest(mediaId.value, supportedCodecs)
       if (currentLoad !== loadSequence) return
       manifestReady.value = true
       manifest.value = playbackManifest
-      if (context.value?.logo === undefined) {
-        void restoreContextLogo(context.value, currentLoad)
+      if (context.value && needsArtworkRefresh(context.value)) {
+        void restoreContextArtwork(context.value, currentLoad)
       }
       if (context.value && !playbackVersions.value.length) {
         void restorePlaybackVersions(context.value, currentLoad)
       }
-      const details = context.value ? [] : await getMediaDetails(mediaId.value)
+      loadingStatus.value = '正在读取影片资料'
+      const details = context.value ? [] : await detailsRequest
       if (currentLoad !== loadSequence) return
       if (!context.value) void hydrateContext(details, playbackManifest, currentLoad)
       await nextTick()
-      const video = videoElement.value
-      if (!video) throw new Error('Video element is unavailable')
       const requestedTime = Number(route.query.t)
       const resumeTime = Number.isFinite(requestedTime) && requestedTime >= 0 ? requestedTime : (context.value?.resumeSeconds ?? 0)
-      await loadShakaPlayer({
-        manifestText: playbackManifest.m3u8_master,
+      await loadPlaybackEngine({
+        cacheKey: mediaId.value,
+        manifest: playbackManifest,
         startTime: resumeTime,
         preferredAudioId: nextAudioPreference,
       })
       nextAudioPreference = ''
-      video.playbackRate = playbackRate.value
-      ready.value = true
-      updatePlaybackState()
-      syncMediaSessionMetadata()
-      syncMediaSessionPosition()
+      loadingStatus.value = '马上就可以播放了'
       const subtitlePreference = nextSubtitlePreference
       nextSubtitlePreference = undefined
       queueSubtitleLoad(playbackManifest, subtitlePreference)
       const shouldAutoplay = nextLoadShouldAutoplay
       nextLoadShouldAutoplay = true
-      if (shouldAutoplay) await video.play().catch(() => undefined)
-      else video.pause()
+      if (engineKind.value === 'libmedia') loadingStatus.value = '点击播放'
+      else if (shouldAutoplay) await playMedia()
+      else await pauseMedia()
       if (currentLoad !== loadSequence) return
+      ready.value = true
+      syncMediaSessionMetadata()
+      syncMediaSessionPosition()
+      loadSubtitlesWhenPlayable()
     } catch (error) {
       if (currentLoad !== loadSequence) return
       console.error('[EMOS REEL] Playback load failed', error)
       if (error instanceof PlaybackManifestError) {
         if (error.status === 404) {
           manifestNotFound.value = true
-          errorMessage.value = '视频地址错误'
-          latestPlaybackErrorMessage.value = ''
-          return
         }
-        errorMessage.value = error.status === 422 && error.responseMessage ? error.responseMessage : `加载播放清单失败 请进行反馈 ${mediaId.value}`
+        errorMessage.value = manifestErrorMessage(error)
         latestPlaybackErrorMessage.value = ''
+        loading.value = false
+        versionSwitching.value = false
         return
       }
-      errorMessage.value = latestPlaybackErrorUserMessage.value || fallbackPlaybackErrorMessage
-      if (!latestPlaybackErrorMessage.value) latestPlaybackErrorMessage.value = formatUnknownPlaybackError(error, mediaId.value)
+      const playbackErrorMessage = concretePlaybackErrorMessage(error) || latestPlaybackErrorUserMessage.value || fallbackPlaybackErrorMessage
+      const technicalMessage = latestPlaybackErrorMessage.value || formatUnknownPlaybackError(error, mediaId.value)
+      errorMessage.value = playbackErrorMessage
+      latestPlaybackErrorMessage.value = technicalMessage
+      loading.value = false
+      versionSwitching.value = false
+      void destroyPlayer().catch((destroyError: unknown) => {
+        console.error('[EMOS REEL] Playback destroy failed after load error', destroyError)
+      })
     } finally {
       if (currentLoad === loadSequence) {
         loading.value = false
@@ -740,8 +677,9 @@
   }
 
   function back() {
-    if (context.value?.forgeReelUuid) {
-      void router.push({ name: 'video', params: { forgeReelUuid: context.value.forgeReelUuid } })
+    const videoRouteId = context.value?.forgeReelUuid ?? context.value?.videoRouteId
+    if (videoRouteId) {
+      void router.push({ name: 'video', params: { forgeReelUuid: videoRouteId } })
     } else {
       router.back()
     }
@@ -751,31 +689,20 @@
     void router.push({ name: 'home' })
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (overlayOpen.value || ['INPUT', 'BUTTON'].includes((event.target as HTMLElement)?.tagName)) return
-    if (event.code === 'Space') {
-      event.preventDefault()
-      showControls()
-      togglePlayback()
-    } else if (event.key === 'ArrowRight' && videoElement.value) {
-      showControls()
-      seekTo(Math.min(duration.value, currentTime.value + 10))
-    } else if (event.key === 'ArrowLeft' && videoElement.value) {
-      showControls()
-      seekTo(Math.max(0, currentTime.value - 10))
-    } else if (event.key.toLowerCase() === 'm') {
-      showControls()
-      toggleMute()
-    } else if (event.key.toLowerCase() === 'f') {
-      showControls()
-      void toggleFullscreen()
-    }
-  }
-
+  usePlayerKeyboardShortcuts({
+    currentTime: () => currentTime.value,
+    duration: () => duration.value,
+    isOverlayOpen: () => overlayOpen.value,
+    isReady: () => ready.value,
+    seekTo,
+    showControls,
+    toggleFullscreen,
+    toggleMute,
+    togglePlayback,
+  })
   useEventListener(document, 'fullscreenchange', () => {
     fullscreen.value = Boolean(document.fullscreenElement)
   })
-  useEventListener(document, 'keydown', handleKeydown)
   useEventListener(window, 'pagehide', () => {
     updatePlayerProgress(mediaId.value, currentTime.value)
     submitLatestPlaybackProgress(true)
@@ -783,14 +710,6 @@
   watch(mediaId, () => {
     episodeSwitcherOpen.value = false
     void loadPlayback()
-  })
-  watch(debugVisible, (visible) => {
-    if (visible) {
-      updateDebugSnapshot()
-      resumeDebugUpdates()
-    } else {
-      pauseDebugUpdates()
-    }
   })
   watch(errorMessage, (message) => {
     if (message) debugVisible.value = false
@@ -804,9 +723,15 @@
     }
   })
   watch(overlayOpen, (open) => setControlsLocked(open))
+  watch(
+    hasDolbyVisionVersion,
+    (hasDolbyVision) => {
+      if (hasDolbyVision) void ensureDolbyVisionPlaybackSupport()
+    },
+    { immediate: true },
+  )
 
   onMounted(() => {
-    canPictureInPicture.value = Boolean(document.pictureInPictureEnabled)
     void loadPlayback()
   })
   onBeforeUnmount(() => {
@@ -816,37 +741,25 @@
     stopHideTimer()
     stopBufferingNotice()
     pauseNextCountdown()
-    pauseDebugUpdates()
+    stopDebugUpdates()
     void destroyPlayer()
   })
 </script>
 
 <template>
   <main ref="playerShell" :class="{ 'controls-hidden': !controlsVisible && ready }" class="player-page" @mousemove="showControls">
-    <img v-if="!ready && context?.backdrop" :alt="title" :src="context.backdrop" class="player-backdrop" />
+    <img v-if="!ready && playerBackdropSource" :alt="title" :src="playerBackdropSource" class="player-backdrop" />
     <div v-if="!ready" class="player-backdrop-shade"></div>
 
     <video
+      v-show="engineKind === 'shaka'"
       ref="videoElement"
       :class="[`subtitle-size-${subtitleFontSize}`, { 'subtitle-background-custom': subtitleBackgroundMode === 'custom' }]"
       :style="{ '--subtitle-background-opacity': String(subtitleBackgroundOpacity) }"
       class="video-surface"
       playsinline
-      @canplay="handlePlaybackCanPlay"
-      @click="togglePlayback"
-      @durationchange="updatePlaybackState"
-      @ended="handlePlaybackEnded"
-      @loadedmetadata="updatePlaybackState"
-      @pause="handlePlaybackPause"
-      @play="handlePlaybackPlay"
-      @playing="handlePlaybackPlaying"
-      @progress="updatePlaybackState"
-      @ratechange="handlePlaybackRateChange"
-      @seeked="handlePlaybackSeeked"
-      @stalled="handleBufferingStart"
-      @timeupdate="handleTimeUpdate"
-      @volumechange="updatePlaybackState"
-      @waiting="handleBufferingStart"></video>
+      @click="togglePlayback"></video>
+    <div v-show="engineKind === 'libmedia'" ref="libmediaContainer" class="libmedia-surface" @click="togglePlayback"></div>
 
     <div aria-hidden="true" class="player-danmaku-layer"></div>
     <div aria-hidden="true" class="player-chapter-track"></div>
@@ -854,11 +767,20 @@
     <header v-if="!manifestNotFound" :class="{ visible: controlsVisible || !ready }" class="player-topbar">
       <div class="player-topbar-leading">
         <button aria-label="返回" class="player-icon" type="button" @click="back"><ChevronLeft :size="24" /></button>
-        <img v-if="isSeries && playerLogo" :alt="baseTitle" :src="playerLogo" class="player-series-logo" />
+        <img v-if="isSeries && playerLogoSource" :alt="baseTitle" :src="playerLogoSource" class="player-series-logo" />
         <strong v-else class="player-title-fallback">{{ baseTitle }}</strong>
-        <strong v-if="isSeries && playerLogo" class="player-mobile-title">{{ baseTitle }}</strong>
+        <strong v-if="isSeries && playerLogoSource" class="player-mobile-title">{{ baseTitle }}</strong>
       </div>
       <div class="player-topbar-actions">
+        <button
+          v-if="signStore.isSignedIn"
+          :title="decoderMode === 'webcodecs' ? '当前：硬解 可点击切换软解' : '当前：软解 可点击切换硬解'"
+          aria-label="切换解码方式"
+          class="player-icon decoder-mode-button"
+          type="button"
+          @click="selectDecoderMode(decoderMode === 'webcodecs' ? 'wasm' : 'webcodecs')">
+          {{ decoderMode === 'webcodecs' ? 'HW' : 'SW' }}
+        </button>
         <button
           v-if="ready && !errorMessage"
           :aria-pressed="debugVisible"
@@ -874,11 +796,12 @@
       </div>
     </header>
 
-    <PlayerDebugPanel v-if="debugVisible && ready && !errorMessage" :snapshot="debugSnapshot" @close="debugVisible = false" />
-    <div v-if="bufferingVisible" :class="{ 'above-now-playing': showNowPlaying }" class="buffering-notice">
+    <PlayerDebugPanel v-if="debugVisible && ready && !errorMessage" :cache-clearing="cacheClearing" :snapshot="debugSnapshot" @close="debugVisible = false" @clear-cache="clearDebugMediaCache" />
+    <div v-if="subtitleError" class="subtitle-error-notice" role="status">{{ subtitleError }}</div>
+    <div v-if="bufferingVisible" :class="{ 'above-now-playing': showNowPlaying }" class="buffering-notice" role="status">
       <LoaderCircle :size="15" class="animate-spin" />
-      <span>缓冲中</span>
-      <small v-if="segmentDownloadBitsPerSecond > 0 && Date.now() - lastSegmentDownloadAt <= 12_000">最近 {{ formatTransferSpeed(segmentDownloadBitsPerSecond) }}</small>
+      <span>{{ seeking ? '正在加载所选位置' : '正在继续加载视频' }}</span>
+      <small v-if="bufferingDetail">{{ bufferingDetail }}</small>
     </div>
 
     <section v-if="!signStore.isSignedIn" class="player-message">
@@ -889,34 +812,22 @@
     <section v-else-if="loading" class="player-message">
       <LoaderCircle :size="26" class="animate-spin" />
       <span>正在打开放映厅</span>
+      <small class="loading-status">{{ loadingStatus }}</small>
     </section>
-    <section v-else-if="errorMessage" class="player-message player-error">
-      <div class="player-error-heading">
-        <AlertCircle :size="27" />
-        <h1>{{ errorMessage }}</h1>
-      </div>
-      <p v-if="latestPlaybackErrorMessage" class="player-error-cause">{{ latestPlaybackErrorMessage }}</p>
-      <div v-if="manifestNotFound" class="player-error-actions">
-        <button class="primary-button" type="button" @click="returnHome">
-          <House :size="17" />
-          返回主页
-        </button>
-      </div>
-      <div v-else :class="{ 'has-version-switcher': playbackVersions.length > 1 }" class="player-error-actions">
-        <button class="primary-button" type="button" @click="loadPlayback">
-          <RotateCw :size="17" />
-          重新载入
-        </button>
-        <PlayerErrorVersionPicker v-if="playbackVersions.length > 1" :selected-media-id="mediaId" :switching="versionSwitching" :versions="playbackVersions" @select="switchPlaybackVersion" />
-        <a class="secondary-button" href="https://voice.somebyte.org/project/250823" rel="noopener noreferrer" target="_blank">
-          <ExternalLink :size="17" />
-          反馈问题
-        </a>
-      </div>
-    </section>
+    <PlayerErrorOverlay
+      v-else-if="errorMessage"
+      :manifest-not-found="manifestNotFound"
+      :message="errorMessage"
+      :selected-media-id="mediaId"
+      :switching-version="versionSwitching"
+      :technical-message="latestPlaybackErrorMessage"
+      :versions="playbackVersions"
+      @reload="loadPlayback"
+      @return-home="returnHome"
+      @select-version="switchPlaybackVersion" />
 
     <button
-      v-if="ready && !errorMessage && paused && (!playbackEnded || endOverlayDismissed)"
+      v-if="ready && !errorMessage && paused && !seeking && (!playbackEnded || endOverlayDismissed)"
       :aria-label="playbackEnded ? '重新播放' : '播放'"
       class="center-play"
       type="button"
@@ -944,6 +855,8 @@
       :can-picture-in-picture="canPictureInPicture"
       :can-previous-episode="canPreviousEpisode"
       :current-time="currentTime"
+      :debug-mode="debugVisible"
+      :dolby-vision-supported="dolbyVisionPlaybackSupported"
       :duration="duration"
       :fullscreen="fullscreen"
       :muted="muted"
@@ -957,6 +870,7 @@
       :show-episode-navigation="isSeries"
       :show-now-playing="showNowPlaying"
       :sprites="manifest?.sprites ?? []"
+      :subtitle-appearance-enabled="engineKind === 'shaka'"
       :subtitle-background-mode="subtitleBackgroundMode"
       :subtitle-background-opacity="subtitleBackgroundOpacity"
       :subtitle-font-size="subtitleFontSize"
@@ -1028,16 +942,28 @@
     background: #000;
     color: white;
     cursor: default;
+    isolation: isolate;
   }
   .player-page.controls-hidden {
     cursor: none;
   }
-  .video-surface {
+  .video-surface,
+  .libmedia-surface {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     background: #000;
+    z-index: 0;
+  }
+  .video-surface {
+    object-fit: contain;
+  }
+  .libmedia-surface :deep(canvas),
+  .libmedia-surface :deep(video) {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
   }
   .video-surface.subtitle-background-custom::cue {
@@ -1062,12 +988,14 @@
     object-fit: cover;
     filter: saturate(0.55);
     opacity: 0.55;
+    z-index: 1;
   }
   .player-backdrop-shade {
     position: absolute;
     inset: 0;
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(16px);
+    z-index: 2;
   }
   .player-danmaku-layer,
   .player-chapter-track {
@@ -1131,6 +1059,22 @@
     align-items: center;
     gap: 2px;
   }
+  .decoder-mode-button {
+    margin-right: 2px;
+    color: rgba(255, 255, 255, 0.82);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+  }
+  .decoder-mode-button:hover {
+    color: white;
+  }
+  .decoder-mode-button:focus-visible {
+    outline: 2px solid var(--reel-accent-soft);
+    outline-offset: 1px;
+  }
   .player-icon {
     display: grid;
     width: 42px;
@@ -1163,39 +1107,11 @@
     color: white;
     font-size: 24px;
   }
-  .player-error {
-    z-index: 7;
-    background: rgba(0, 0, 0, 0.66);
-    backdrop-filter: blur(8px);
-  }
-  .player-error-heading {
-    display: flex;
-    width: min(900px, 92vw);
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-  }
-  .player-error-heading svg {
-    flex: 0 0 auto;
-  }
-  .player-error-heading h1 {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    line-height: 1.45;
-  }
-  .player-error-cause {
-    width: min(760px, 88vw);
-    margin: -3px 0 1px;
-    color: rgba(255, 255, 255, 0.62);
-    font-size: 13px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
-  .player-error-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 10px;
+  .loading-status {
+    min-height: 18px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 12px;
+    line-height: 1.5;
   }
   .center-play {
     position: absolute;
@@ -1233,6 +1149,23 @@
     backdrop-filter: blur(8px);
     font-size: 12px;
     line-height: 1;
+    pointer-events: none;
+  }
+  .subtitle-error-notice {
+    position: absolute;
+    z-index: 8;
+    bottom: 132px;
+    left: 50%;
+    max-width: min(90vw, 420px);
+    transform: translateX(-50%);
+    padding: 10px 14px;
+    border: 1px solid rgba(220, 138, 132, 0.35);
+    border-radius: 4px;
+    background: rgba(40, 18, 16, 0.9);
+    color: rgba(255, 236, 234, 0.95);
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: center;
     pointer-events: none;
   }
   .buffering-notice.above-now-playing {
@@ -1292,25 +1225,9 @@
     .player-message h1 {
       font-size: 20px;
     }
-    .player-error-cause {
-      font-size: 11px;
-    }
-    .player-error-actions {
-      display: grid;
-      width: min(300px, 100%);
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .player-error-actions > .primary-button {
-      grid-column: 1 / -1;
-      width: 100%;
-    }
-    .player-error-actions > .secondary-button {
-      grid-column: 1 / -1;
-      width: 100%;
-    }
-    .player-error-actions.has-version-switcher > .secondary-button {
-      grid-column: auto;
+    .decoder-mode-button {
+      margin-right: 2px;
+      font-size: 12px;
     }
     .data-warning {
       font-size: 11px;

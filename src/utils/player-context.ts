@@ -3,7 +3,8 @@ import type { MediaVersion } from '@/api/types'
 
 export interface PlayerContext {
   mediaId: string
-  forgeReelUuid: string
+  videoRouteId?: string
+  forgeReelUuid?: string
   todbId: number
   videoListId: number
   videoType: string

@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { AlertCircle, LoaderCircle, RotateCw } from '@lucide/vue'
-import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { getErrorStatus, getRandomReel } from '@/api/emos'
+  import { AlertCircle, LoaderCircle, RotateCw } from '@lucide/vue'
+  import { onMounted, ref } from 'vue'
+  import { useRouter } from 'vue-router'
+  import { getErrorStatus, getRandomReel } from '@/api/emos'
 
-const router = useRouter()
+  const router = useRouter()
   const loading = ref(true)
   const message = ref('')
 

@@ -7,6 +7,12 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView },
     {
+      path: '/search',
+      name: 'search',
+      component: () => import('@/views/SearchView.vue'),
+      meta: { keepAlive: true },
+    },
+    {
       path: '/video/:forgeReelUuid',
       name: 'video',
       component: () => import('@/views/VideoView.vue'),
@@ -25,7 +31,7 @@ const router = createRouter({
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
-  scrollBehavior: () => ({ top: 0 }),
+  scrollBehavior: (_to, _from, savedPosition) => savedPosition ?? { top: 0 },
 })
 
 export default router

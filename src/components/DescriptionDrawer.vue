@@ -1,9 +1,9 @@
 <script lang="ts" setup>
-import { X } from '@lucide/vue'
-import { useEventListener, useScrollLock } from '@vueuse/core'
-import { watch } from 'vue'
+  import { X } from '@lucide/vue'
+  import { useEventListener, useScrollLock } from '@vueuse/core'
+  import { watch } from 'vue'
 
-const props = defineProps<{ open: boolean; title: string; description: string }>()
+  const props = defineProps<{ open: boolean; title: string; description: string }>()
   const emit = defineEmits<{ close: [] }>()
   const bodyLocked = useScrollLock(document.body)
 

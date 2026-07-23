@@ -1,14 +1,16 @@
 <script lang="ts" setup>
-import dayjs from 'dayjs'
-import durationPlugin from 'dayjs/plugin/duration'
-import { ImageOff, LoaderCircle } from '@lucide/vue'
-import { useMediaQuery, useThrottleFn } from '@vueuse/core'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { ManifestSprite } from '@/api/types'
-import type { PlayerBufferedRange } from '@/types/player'
-import { getSpritePreviewFrame, pickPreviewSprite } from '@/utils/sprite-preview'
+  import dayjs from 'dayjs'
+  import durationPlugin from 'dayjs/plugin/duration'
+  import { ImageOff, LoaderCircle } from '@lucide/vue'
+  import { useMediaQuery, useThrottleFn } from '@vueuse/core'
+  import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+  import type { ManifestSprite } from '@/api/types'
+  import type { PlayerBufferedRange } from '@/types/player'
+  import { getSpritePreviewFrame, pickPreviewSprite } from '@/utils/sprite-preview'
 
-dayjs.extend(durationPlugin)
+  dayjs.extend(durationPlugin)
+
+  const MIN_DISPLAYED_BUFFER_SECONDS = 10
 
   const props = defineProps<{
     currentTime: number
@@ -28,6 +30,7 @@ dayjs.extend(durationPlugin)
   const spriteCanvas = ref<HTMLCanvasElement>()
   const hoverPreview = ref(false)
   const hoverTime = ref(0)
+  const seekDraft = ref<number>()
   const previewLeft = ref(0)
   const previewWidth = ref(640)
   const previewStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -36,7 +39,22 @@ dayjs.extend(durationPlugin)
   let pointerInside = false
   let spriteRenderSequence = 0
 
-  const progress = computed(() => (props.duration > 0 ? (props.currentTime / props.duration) * 100 : 0))
+  const displayedTime = computed(() => seekDraft.value ?? props.currentTime)
+  const progress = computed(() => (props.duration > 0 ? (displayedTime.value / props.duration) * 100 : 0))
+  const availableRanges = computed(() => {
+    const ranges = props.bufferedRanges
+      .map((range) => ({ start: Math.min(100, Math.max(0, range.start)), end: Math.min(100, Math.max(0, range.end)) }))
+      .filter((range) => range.end > range.start)
+      .sort((left, right) => left.start - right.start)
+    const merged: Array<{ start: number; end: number }> = []
+    for (const range of ranges) {
+      const previous = merged.at(-1)
+      if (!previous || range.start > previous.end + 0.05) merged.push({ ...range })
+      else previous.end = Math.max(previous.end, range.end)
+    }
+    if (!Number.isFinite(props.duration) || props.duration <= 0) return []
+    return merged.filter((range) => ((range.end - range.start) / 100) * props.duration >= MIN_DISPLAYED_BUFFER_SECONDS)
+  })
   const hoverTimeLabel = computed(() => dayjs.duration(Math.max(0, hoverTime.value), 'seconds').format(hoverTime.value >= 3600 ? 'HH:mm:ss' : 'mm:ss'))
   const activeSprite = computed(() => pickPreviewSprite(props.sprites))
   const previewFrame = computed(() => getSpritePreviewFrame(activeSprite.value, hoverTime.value))
@@ -185,8 +203,27 @@ dayjs.extend(durationPlugin)
     hideSeekPreview()
   }
 
-  function handleSeek(event: Event) {
-    emit('seek', Number((event.target as HTMLInputElement).value))
+  function handleSeekInput(event: Event) {
+    seekDraft.value = Number((event.target as HTMLInputElement).value)
+    emit('interact')
+  }
+
+  function handleSeekCommit(event: Event) {
+    const target = Number((event.target as HTMLInputElement).value)
+    seekDraft.value = target
+    emit('seek', target)
+    emit('interact')
+    void nextTick(() => {
+      if (seekDraft.value === target) seekDraft.value = undefined
+    })
+  }
+
+  function handleSeekKeydown(event: KeyboardEvent) {
+    const offset = event.key === 'ArrowRight' ? 10 : event.key === 'ArrowLeft' ? -10 : 0
+    if (!offset || props.duration <= 0) return
+    event.preventDefault()
+    seekDraft.value = undefined
+    emit('seek', Math.min(props.duration, Math.max(0, props.currentTime + offset)))
     emit('interact')
   }
 
@@ -225,9 +262,20 @@ dayjs.extend(durationPlugin)
     </div>
 
     <div class="buffer-track">
-      <span v-for="(range, index) in bufferedRanges" :key="`${index}:${range.start}:${range.end}`" :style="{ left: `${range.start}%`, width: `${Math.max(0, range.end - range.start)}%` }"></span>
+      <span v-for="(range, index) in availableRanges" :key="`${index}:${range.start}:${range.end}`" :style="{ left: `${range.start}%`, width: `${Math.max(0, range.end - range.start)}%` }"></span>
     </div>
-    <input :max="duration || 0" :style="{ '--seek-progress': `${progress}%` }" :value="currentTime" aria-label="播放进度" class="seek-range" min="0" step="0.05" type="range" @input="handleSeek" />
+    <input
+      :max="duration || 0"
+      :style="{ '--seek-progress': `${progress}%` }"
+      :value="displayedTime"
+      aria-label="播放进度"
+      class="seek-range"
+      min="0"
+      step="0.05"
+      type="range"
+      @change="handleSeekCommit"
+      @input="handleSeekInput"
+      @keydown="handleSeekKeydown" />
   </div>
 </template>
 
@@ -249,7 +297,7 @@ dayjs.extend(durationPlugin)
     position: absolute;
     top: 0;
     height: 100%;
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.42);
   }
   .seek-range {
     --seek-progress: 0%;

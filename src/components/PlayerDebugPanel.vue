@@ -1,14 +1,16 @@
 <script lang="ts" setup>
-import { Activity, X } from '@lucide/vue'
-import { StorageSerializers, useDraggable, useEventListener, useMediaQuery, useSessionStorage } from '@vueuse/core'
-import { computed, nextTick, onMounted, ref } from 'vue'
-import type { PlayerDebugSnapshot } from '@/types/player'
+  import { Activity, Trash2, X } from '@lucide/vue'
+  import { StorageSerializers, useDraggable, useEventListener, useMediaQuery, useSessionStorage } from '@vueuse/core'
+  import { computed, nextTick, onMounted, ref } from 'vue'
+  import PlayerSeekDebugList from '@/components/PlayerSeekDebugList.vue'
+  import type { PlayerDebugSnapshot } from '@/types/player'
 
-defineProps<{
+  defineProps<{
+    cacheClearing: boolean
     snapshot: PlayerDebugSnapshot
   }>()
 
-  defineEmits<{ close: [] }>()
+  defineEmits<{ clearCache: []; close: [] }>()
 
   interface PanelPosition {
     x: number
@@ -60,36 +62,77 @@ defineProps<{
 <template>
   <aside ref="panel" :class="{ dragging: isDragging }" :style="panelStyle" aria-label="播放调试信息" class="debug-panel">
     <header ref="dragHandle">
-      <span>
+      <span class="panel-title">
         <Activity :size="15" />
-        播放调试信息
+        播放信息
       </span>
-      <button aria-label="关闭播放调试信息" type="button" @click="$emit('close')"><X :size="17" /></button>
+      <button aria-label="关闭播放信息" type="button" @click="$emit('close')"><X :size="17" /></button>
     </header>
-    <div class="speed-row">
-      <span>速度</span>
-      <strong>{{ snapshot.downloadSpeed }}</strong>
+    <div class="debug-content">
+      <dl class="debug-list">
+        <div class="debug-row">
+          <dt>视频读取</dt>
+          <dd class="speed-value">{{ snapshot.readStatus }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>网络带宽</dt>
+          <dd>{{ snapshot.estimatedBandwidth }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>视频码率</dt>
+          <dd>{{ snapshot.streamBandwidth }}</dd>
+        </div>
+        <div v-if="snapshot.showLibmediaDiagnostics" class="debug-row">
+          <dt>缓冲构成</dt>
+          <dd>{{ snapshot.bufferDiagnostics }}</dd>
+        </div>
+        <div v-if="snapshot.showLibmediaDiagnostics" class="debug-row">
+          <dt>后台缓存</dt>
+          <dd>{{ snapshot.persistentReadAhead }}</dd>
+        </div>
+        <div v-if="snapshot.showLibmediaDiagnostics" class="debug-row">
+          <dt>数据状态</dt>
+          <dd>{{ snapshot.streamState }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>视频尺寸</dt>
+          <dd>{{ snapshot.resolution }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>窗口尺寸</dt>
+          <dd>{{ snapshot.viewport }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>丢帧统计</dt>
+          <dd>{{ snapshot.droppedFrames }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>编码格式</dt>
+          <dd>{{ snapshot.codecs }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>播放版本</dt>
+          <dd>{{ snapshot.mediaName }}</dd>
+        </div>
+        <div v-if="snapshot.storageLocation" class="debug-row">
+          <dt>储存位置</dt>
+          <dd>{{ snapshot.storageLocation }}</dd>
+        </div>
+        <div class="debug-row">
+          <dt>视频编号</dt>
+          <dd>{{ snapshot.mediaId }}</dd>
+        </div>
+        <div v-if="snapshot.showLibmediaDiagnostics" class="debug-row cache-row">
+          <dt>全局缓存</dt>
+          <dd>{{ snapshot.mediaCache }}</dd>
+          <button :aria-label="cacheClearing ? '正在清除全局本机缓存' : '清除全局本机缓存'" :disabled="cacheClearing" type="button" @click="$emit('clearCache')">
+            <Trash2 :size="14" />
+          </button>
+        </div>
+      </dl>
+
+      <PlayerSeekDebugList v-if="snapshot.showLibmediaDiagnostics" :entries="snapshot.seekLogs" />
     </div>
-    <dl>
-      <dt>网络估算</dt>
-      <dd>{{ snapshot.estimatedBandwidth }}</dd>
-      <dt>当前码率</dt>
-      <dd>{{ snapshot.streamBandwidth }}</dd>
-      <dt>缓冲时长</dt>
-      <dd>{{ snapshot.bufferAhead }}</dd>
-      <dt>播放器尺寸</dt>
-      <dd>{{ snapshot.viewport }}</dd>
-      <dt>视频分辨率</dt>
-      <dd>{{ snapshot.resolution }}</dd>
-      <dt>丢帧</dt>
-      <dd>{{ snapshot.droppedFrames }}</dd>
-      <dt>编码</dt>
-      <dd>{{ snapshot.codecs }}</dd>
-      <dt>播放版本</dt>
-      <dd>{{ snapshot.mediaName }}</dd>
-      <dt>Media ID</dt>
-      <dd>{{ snapshot.mediaId }}</dd>
-    </dl>
   </aside>
 </template>
 
@@ -107,7 +150,14 @@ defineProps<{
     color: rgba(255, 255, 255, 0.78);
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
     backdrop-filter: blur(10px);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family:
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
     pointer-events: auto;
   }
   .debug-panel header {
@@ -124,12 +174,11 @@ defineProps<{
   .debug-panel.dragging header {
     cursor: grabbing;
   }
-  .debug-panel header span {
+  .panel-title {
     display: flex;
     align-items: center;
     gap: 7px;
     color: white;
-    font-family: inherit;
     font-size: 13px;
     font-weight: 700;
   }
@@ -148,42 +197,61 @@ defineProps<{
     background: rgba(255, 255, 255, 0.1);
     color: white;
   }
-  .speed-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 12px 13px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  .debug-content {
+    max-height: min(650px, calc(100vh - 170px));
+    overflow-y: auto;
   }
-  .speed-row span {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 11px;
-  }
-  .speed-row strong {
-    color: var(--reel-accent-soft);
-    font-size: 19px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-  .debug-panel dl {
-    display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
+  .debug-list {
     margin: 0;
-    padding: 9px 13px 12px;
-    font-size: 11px;
-    line-height: 1.65;
+    padding: 12px 14px 13px;
   }
-  .debug-panel dt {
+  .debug-row {
+    display: grid;
+    min-height: 22px;
+    grid-template-columns: 82px minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .debug-list dt {
     color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
+    line-height: 1.35;
+    white-space: nowrap;
   }
-  .debug-panel dd {
+  .debug-list dd {
     min-width: 0;
     overflow: hidden;
     margin: 0;
     color: rgba(255, 255, 255, 0.82);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .debug-list .speed-value {
+    color: var(--reel-accent-soft);
+    font-weight: 700;
+  }
+  .cache-row button {
+    display: grid;
+    width: 27px;
+    height: 27px;
+    grid-column: 3;
+    place-items: center;
+    margin-left: 10px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.66);
+  }
+  .cache-row button:hover:not(:disabled) {
+    border-color: rgba(220, 138, 132, 0.36);
+    background: rgba(220, 138, 132, 0.1);
+    color: rgba(239, 167, 160, 0.96);
+  }
+  .cache-row button:disabled {
+    opacity: 0.56;
   }
   @media (max-width: 620px) {
     .debug-panel {
@@ -195,12 +263,8 @@ defineProps<{
       cursor: default;
       touch-action: auto;
     }
-    .debug-panel dl {
-      grid-template-columns: 88px minmax(0, 1fr);
-      font-size: 10px;
-    }
-    .speed-row strong {
-      font-size: 16px;
+    .debug-content {
+      max-height: calc(100vh - 180px);
     }
   }
 </style>

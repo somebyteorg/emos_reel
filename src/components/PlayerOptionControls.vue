@@ -1,12 +1,13 @@
 <script lang="ts" setup>
-import { AudioLines, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
-import { onClickOutside, useEventListener } from '@vueuse/core'
-import { computed, ref } from 'vue'
-import { formatFileSize } from '@/utils/file-size'
-import type { MediaVersion } from '@/api/types'
-import type { PlaybackAudioOption } from '@/types/player'
+  import { AudioLines, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
+  import { onClickOutside, useEventListener } from '@vueuse/core'
+  import { computed, ref } from 'vue'
+  import { formatFileSize } from '@/utils/file-size'
+  import { formatMediaVersionSummary, getMediaVersionDolbyVisionWarning } from '@/utils/media-metadata'
+  import type { MediaVersion } from '@/api/types'
+  import type { PlaybackAudioOption } from '@/types/player'
 
-type OptionMenu = 'quality' | 'rate' | 'audio' | null
+  type OptionMenu = 'quality' | 'rate' | 'audio' | null
 
   const props = defineProps<{
     open: OptionMenu
@@ -14,8 +15,10 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
     selectedMediaId: string
     switchingVersion: boolean
     playbackRate: number
+    debugMode: boolean
     audioTracks: PlaybackAudioOption[]
     selectedAudio: string
+    dolbyVisionSupported: boolean | null
   }>()
 
   const emit = defineEmits<{
@@ -26,11 +29,17 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
   }>()
 
   const root = ref<HTMLElement>()
-  const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 2]
+  const playbackRates = computed(() => (props.debugMode ? [0.5, 0.75, 1, 1.25, 1.5, 2, 5] : [0.5, 0.75, 1, 1.25, 1.5, 2]))
   const selectedVersion = computed(() => props.versions.find((version) => version.media_id === props.selectedMediaId))
   const qualityLabel = computed(() => selectedVersion.value?.media_name || '播放版本')
   const rateLabel = computed(() => (props.playbackRate === 1 ? '1×' : `${props.playbackRate}×`))
   const audioLabel = computed(() => props.audioTracks.find((audio) => audio.id === props.selectedAudio)?.label || '默认音轨')
+  const selectedDolbyVisionWarning = computed(() => getMediaVersionDolbyVisionWarning(selectedVersion.value, props.dolbyVisionSupported))
+  const menuTitle = computed(() => {
+    if (props.open === 'quality') return '画质'
+    if (props.open === 'rate') return '播放速度'
+    return '音轨'
+  })
 
   function toggleMenu(menu: Exclude<OptionMenu, null>) {
     emit('update:open', props.open === menu ? null : menu)
@@ -83,15 +92,25 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
 
     <Transition name="option-menu">
       <div v-if="open" class="option-menu">
-        <header>{{ open === 'quality' ? '画质' : open === 'rate' ? '播放速度' : '音轨' }}</header>
+        <header :class="{ 'with-note': open === 'quality' && selectedDolbyVisionWarning }">
+          <span>{{ menuTitle }}</span>
+          <small v-if="open === 'quality' && selectedDolbyVisionWarning">{{ selectedDolbyVisionWarning }}</small>
+        </header>
         <div v-if="open === 'quality'" class="option-list">
           <button v-for="version in versions" :key="version.media_id" :class="{ active: selectedMediaId === version.media_id }" type="button" @click="chooseMedia(version.media_id)">
             <span class="version-copy">
               <b>{{ version.media_name }}</b>
               <span class="version-meta">
-                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="11" />{{ version.storage_title }}</span>
-                <small class="file-size"><File :size="11" />{{ formatFileSize(version.media_size) }}</small>
+                <span v-if="version.storage_title" class="storage-title">
+                  <HardDrive :size="11" />
+                  {{ version.storage_title }}
+                </span>
+                <small class="file-size">
+                  <File :size="11" />
+                  {{ formatFileSize(version.media_size) }}
+                </small>
               </span>
+              <small v-if="formatMediaVersionSummary(version)" class="version-summary">{{ formatMediaVersionSummary(version) }}</small>
             </span>
             <Check v-if="selectedMediaId === version.media_id" :size="15" />
           </button>
@@ -102,7 +121,7 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
             <Check v-if="playbackRate === rate" :size="15" />
           </button>
         </div>
-        <div v-else class="option-list audio-list">
+        <div v-else-if="open === 'audio'" class="option-list audio-list">
           <button v-for="audio in audioTracks" :key="audio.id" :class="{ active: selectedAudio === audio.id }" type="button" @click="chooseAudio(audio.id)">
             <span>{{ audio.label }}</span>
             <Check v-if="selectedAudio === audio.id" :size="15" />
@@ -178,7 +197,7 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
     z-index: 18;
     right: 0;
     bottom: calc(100% + 10px);
-    width: 292px;
+    width: min(384px, calc(100vw - 16px));
     overflow: hidden;
     border: 1px solid var(--reel-line);
     border-radius: 5px;
@@ -186,11 +205,27 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
     box-shadow: 0 20px 58px rgba(0, 0, 0, 0.58);
   }
   .option-menu header {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
     padding: 11px 13px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.09);
     color: rgba(255, 255, 255, 0.52);
     font-size: 11px;
     font-weight: 700;
+  }
+  .option-menu header.with-note {
+    align-items: flex-start;
+  }
+  .option-menu header small {
+    min-width: 0;
+    color: rgba(255, 211, 132, 0.9);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-align: right;
   }
   .option-list {
     max-height: min(340px, 55svh);
@@ -269,6 +304,14 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
     gap: 4px;
     line-height: 1;
   }
+  .version-summary {
+    min-width: 0;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .storage-title svg,
   .file-size svg {
     display: block;
@@ -329,7 +372,7 @@ type OptionMenu = 'quality' | 'rate' | 'audio' | null
       display: none;
     }
     .option-menu {
-      width: min(292px, calc(100vw - 16px));
+      width: min(384px, calc(100vw - 16px));
     }
     .option-list button {
       font-size: 12px;

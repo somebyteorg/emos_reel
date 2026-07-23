@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { Check, ChevronDown } from '@lucide/vue'
-import { onClickOutside } from '@vueuse/core'
-import { computed, nextTick, ref, watch } from 'vue'
-import type { SeasonInfo } from '@/api/types'
+  import { Check, ChevronDown } from '@lucide/vue'
+  import { onClickOutside } from '@vueuse/core'
+  import { computed, nextTick, ref, watch } from 'vue'
+  import type { SeasonInfo } from '@/api/types'
 
-const props = defineProps<{
+  const props = defineProps<{
     seasons: SeasonInfo[]
     modelValue: number | null
   }>()

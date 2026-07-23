@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import { LoaderCircle, TriangleAlert } from '@lucide/vue'
-import { onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useSignStore } from '@/stores/sign'
+  import { LoaderCircle, TriangleAlert } from '@lucide/vue'
+  import { onMounted, ref } from 'vue'
+  import { useRoute, useRouter } from 'vue-router'
+  import { useSignStore } from '@/stores/sign'
 
-type Status = 'loading' | 'error'
+  type Status = 'loading' | 'error'
 
   const route = useRoute()
   const router = useRouter()

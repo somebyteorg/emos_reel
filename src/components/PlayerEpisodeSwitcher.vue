@@ -1,16 +1,16 @@
 <script lang="ts" setup>
-import dayjs from 'dayjs'
-import { Clapperboard, Film, LoaderCircle, X } from '@lucide/vue'
-import { useEventListener, useMediaQuery, useSwipe } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
-import EpisodeGrid from '@/components/EpisodeGrid.vue'
-import EpisodeSortControl from '@/components/EpisodeSortControl.vue'
-import PlaybackSplitButton from '@/components/PlaybackSplitButton.vue'
-import SeasonSelect from '@/components/SeasonSelect.vue'
-import { imageUrl } from '@/api/todb'
-import type { EpisodeInfo, MediaSource, MediaVersion, SeasonInfo } from '@/api/types'
+  import dayjs from 'dayjs'
+  import { Clapperboard, Film, LoaderCircle, X } from '@lucide/vue'
+  import { useEventListener, useMediaQuery, useSwipe } from '@vueuse/core'
+  import { computed, ref, watch } from 'vue'
+  import EpisodeGrid from '@/components/EpisodeGrid.vue'
+  import EpisodeSortControl from '@/components/EpisodeSortControl.vue'
+  import PlaybackSplitButton from '@/components/PlaybackSplitButton.vue'
+  import SeasonSelect from '@/components/SeasonSelect.vue'
+  import { imageUrl } from '@/api/todb'
+  import type { EpisodeInfo, MediaSource, MediaVersion, SeasonInfo } from '@/api/types'
 
-const props = defineProps<{
+  const props = defineProps<{
     open: boolean
     title: string
     seasons: SeasonInfo[]

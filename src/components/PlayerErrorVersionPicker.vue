@@ -1,11 +1,12 @@
 <script lang="ts" setup>
-import { ArrowLeftRight, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
-import { onClickOutside, useEventListener } from '@vueuse/core'
-import { ref } from 'vue'
-import type { MediaVersion } from '@/api/types'
-import { formatFileSize } from '@/utils/file-size'
+  import { ArrowLeftRight, Check, ChevronDown, File, HardDrive, LoaderCircle } from '@lucide/vue'
+  import { onClickOutside, useEventListener } from '@vueuse/core'
+  import { ref } from 'vue'
+  import type { MediaVersion } from '@/api/types'
+  import { formatFileSize } from '@/utils/file-size'
+  import { formatMediaVersionSummary } from '@/utils/media-metadata'
 
-const props = defineProps<{
+  const props = defineProps<{
     versions: MediaVersion[]
     selectedMediaId: string
     switching: boolean
@@ -59,9 +60,16 @@ const props = defineProps<{
             <span>
               <b>{{ version.media_name }}</b>
               <span class="version-meta">
-                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="12" />{{ version.storage_title }}</span>
-                <small class="file-size"><File :size="12" />{{ formatFileSize(version.media_size) }}</small>
+                <span v-if="version.storage_title" class="storage-title">
+                  <HardDrive :size="12" />
+                  {{ version.storage_title }}
+                </span>
+                <small class="file-size">
+                  <File :size="12" />
+                  {{ formatFileSize(version.media_size) }}
+                </small>
               </span>
+              <small v-if="formatMediaVersionSummary(version)" class="version-summary">{{ formatMediaVersionSummary(version) }}</small>
             </span>
             <Check v-if="version.media_id === selectedMediaId" :size="16" />
           </button>
@@ -197,6 +205,14 @@ const props = defineProps<{
   .file-size svg {
     display: block;
     flex: 0 0 auto;
+  }
+  .version-summary {
+    min-width: 0;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .error-version-list svg {
     flex: 0 0 auto;

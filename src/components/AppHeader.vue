@@ -1,24 +1,27 @@
 <script lang="ts" setup>
-import { ArrowLeft, LogOut, UserRound } from '@lucide/vue'
-import { ref, watch } from 'vue'
+  import { ArrowLeft, LogOut, Search, UserRound } from '@lucide/vue'
+  import { ref, watch } from 'vue'
 
-const props = withDefaults(
+  const props = withDefaults(
     defineProps<{
       signedIn: boolean
       username?: string
       avatar?: string | null
       showBack?: boolean
+      showSearch?: boolean
     }>(),
     {
       username: '',
       avatar: null,
       showBack: false,
+      showSearch: false,
     },
   )
 
   const emit = defineEmits<{
     back: []
     brand: []
+    search: []
     signout: []
   }>()
 
@@ -48,16 +51,22 @@ const props = withDefaults(
       </button>
     </div>
 
-    <div v-if="signedIn" class="account-root">
-      <div class="account-session">
-        <div class="account-identity">
-          <img v-if="avatar && !avatarUnavailable" :src="avatar" alt="" class="account-avatar" @error="avatarUnavailable = true" />
-          <UserRound v-else :size="17" />
-          <span>{{ username || '已登录' }}</span>
+    <div class="header-actions">
+      <button v-if="showSearch" aria-label="搜索影片" class="header-icon-button" type="button" @click="emit('search')">
+        <Search :size="19" />
+      </button>
+
+      <div v-if="signedIn" class="account-root">
+        <div class="account-session">
+          <div class="account-identity">
+            <img v-if="avatar && !avatarUnavailable" :src="avatar" alt="" class="account-avatar" @error="avatarUnavailable = true" />
+            <UserRound v-else :size="17" />
+            <span>{{ username || '已登录' }}</span>
+          </div>
+          <button aria-label="退出登录" class="signout-button" type="button" @click="signOut">
+            <LogOut :size="15" />
+          </button>
         </div>
-        <button aria-label="退出登录" class="signout-button" type="button" @click="signOut">
-          <LogOut :size="15" />
-        </button>
       </div>
     </div>
   </header>
@@ -77,6 +86,12 @@ const props = withDefaults(
     display: flex;
     align-items: center;
     gap: 14px;
+  }
+  .header-actions {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
   }
   .header-icon-button,
   .account-session {
@@ -175,6 +190,9 @@ const props = withDefaults(
     }
     .account-identity {
       padding: 0 9px;
+    }
+    .header-actions {
+      gap: 7px;
     }
     .account-identity > span {
       max-width: 72px;

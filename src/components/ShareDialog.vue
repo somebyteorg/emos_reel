@@ -1,12 +1,12 @@
 <script lang="ts" setup>
-import dayjs from 'dayjs'
-import durationPlugin from 'dayjs/plugin/duration'
-import { Check, Clipboard, X } from '@lucide/vue'
-import { useClipboard } from '@vueuse/core'
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+  import dayjs from 'dayjs'
+  import durationPlugin from 'dayjs/plugin/duration'
+  import { Check, Clipboard, X } from '@lucide/vue'
+  import { useClipboard } from '@vueuse/core'
+  import { computed, ref } from 'vue'
+  import { useRoute } from 'vue-router'
 
-dayjs.extend(durationPlugin)
+  dayjs.extend(durationPlugin)
 
   const props = defineProps<{ open: boolean; title: string; currentTime: number }>()
   const emit = defineEmits<{ close: [] }>()

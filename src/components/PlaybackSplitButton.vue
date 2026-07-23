@@ -1,11 +1,13 @@
 <script lang="ts" setup>
-import { Check, ChevronDown, CircleCheck, File, HardDrive, Play } from '@lucide/vue'
-import { onClickOutside, useEventListener } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
-import { formatFileSize } from '@/utils/file-size'
-import type { MediaVersion } from '@/api/types'
+  import { Check, ChevronDown, CircleCheck, File, HardDrive, Info, Play } from '@lucide/vue'
+  import { onClickOutside, useEventListener } from '@vueuse/core'
+  import { computed, ref, watch } from 'vue'
+  import { formatFileSize } from '@/utils/file-size'
+  import type { PlaybackCodec } from '@/utils/media-codecs'
+  import { formatMediaVersionSummary, getMediaVersionPlaybackSupport, type MediaVersionPlaybackSupport } from '@/utils/media-metadata'
+  import type { MediaVersion } from '@/api/types'
 
-const props = defineProps<{
+  const props = defineProps<{
     versions: MediaVersion[]
     modelValue: string
     canPlay: boolean
@@ -15,6 +17,8 @@ const props = defineProps<{
     actionLabel?: string
     resumeSeconds?: number | null
     isComplete?: boolean
+    selectedSupport?: MediaVersionPlaybackSupport
+    supportedCodecs?: readonly PlaybackCodec[]
   }>()
 
   const emit = defineEmits<{
@@ -25,6 +29,7 @@ const props = defineProps<{
   const root = ref<HTMLElement>()
   const open = ref(false)
   const selectedVersion = computed(() => props.versions.find((version) => version.media_id === props.modelValue))
+  const selectedVersionSummary = computed(() => (selectedVersion.value ? formatMediaVersionSummary(selectedVersion.value) : ''))
   const hasMultipleVersions = computed(() => props.versions.length > 1)
   const resolvedActionLabel = computed(() => props.actionLabel ?? (props.isComplete ? '重新播放' : (props.resumeSeconds ?? 0) > 0 ? '继续播放' : '开始播放'))
   const canRestart = computed(() => props.canPlay && !props.isComplete && (props.resumeSeconds ?? 0) > 0)
@@ -37,6 +42,10 @@ const props = defineProps<{
   function selectVersion(mediaId: string) {
     emit('update:modelValue', mediaId)
     open.value = false
+  }
+
+  function versionSupport(version: MediaVersion) {
+    return getMediaVersionPlaybackSupport(version, props.supportedCodecs)
   }
 
   onClickOutside(root, () => {
@@ -77,9 +86,18 @@ const props = defineProps<{
             <span class="version-copy">
               <span class="version-name">{{ version.media_name }}</span>
               <span class="version-meta">
-                <span v-if="version.storage_title" class="storage-title"><HardDrive :size="12" />{{ version.storage_title }}</span>
-                <small class="file-size"><File :size="12" />{{ formatFileSize(version.media_size) }}</small>
+                <span v-if="version.storage_title" class="storage-title">
+                  <HardDrive :size="12" />
+                  {{ version.storage_title }}
+                </span>
+                <small class="file-size">
+                  <File :size="12" />
+                  {{ formatFileSize(version.media_size) }}
+                </small>
+                <small v-if="versionSupport(version).playable === false" class="support-badge">不可播放</small>
               </span>
+              <small v-if="versionSupport(version).playable === false" class="version-summary warning">{{ versionSupport(version).reason }}</small>
+              <small v-else-if="formatMediaVersionSummary(version)" class="version-summary">{{ formatMediaVersionSummary(version) }}</small>
             </span>
           </button>
         </div>
@@ -87,15 +105,32 @@ const props = defineProps<{
     </Transition>
 
     <p v-if="error" class="action-message">{{ error }}</p>
+    <p v-else-if="selectedSupport?.playable === false" class="action-message">{{ selectedSupport.reason }}</p>
     <p v-else-if="!versions.length && !loading" class="action-message">当前内容暂无播放版本</p>
 
     <div v-if="selectedVersion" class="selected-version">
-      <span aria-label="当前版本" class="selected-version-name" title="当前版本">
-        <CircleCheck :size="12" />
-        {{ selectedVersion.media_name }}
-      </span>
-      <span v-if="selectedVersion.storage_title" class="selected-storage"><HardDrive :size="12" />{{ selectedVersion.storage_title }}</span>
-      <small class="selected-file-size"><File :size="12" />{{ formatFileSize(selectedVersion.media_size) }}</small>
+      <div class="selected-version-copy">
+        <div class="selected-version-line">
+          <span aria-label="当前版本" class="selected-version-name" title="当前版本">
+            <CircleCheck :size="12" />
+            <span>{{ selectedVersion.media_name }}</span>
+          </span>
+        </div>
+        <div class="selected-version-line selected-version-line-secondary">
+          <span v-if="selectedVersion.storage_title" class="selected-storage">
+            <HardDrive :size="12" />
+            <span>{{ selectedVersion.storage_title }}</span>
+          </span>
+          <small class="selected-file-size">
+            <File :size="12" />
+            {{ formatFileSize(selectedVersion.media_size) }}
+          </small>
+        </div>
+        <small v-if="selectedVersionSummary" class="selected-summary">
+          <Info :size="12" />
+          <span>{{ selectedVersionSummary }}</span>
+        </small>
+      </div>
       <button v-if="canRestart" type="button" @click="emit('play', true)">从头播放</button>
     </div>
 
@@ -116,16 +151,20 @@ const props = defineProps<{
     position: relative;
     display: grid;
     min-width: 250px;
-    justify-items: end;
+    justify-items: stretch;
     gap: 6px;
+  }
+  .playback-action > * {
+    justify-self: end;
   }
   .split-button {
     display: grid;
-    grid-template-columns: minmax(140px, auto) 44px;
+    width: 100%;
+    grid-template-columns: minmax(140px, 1fr) 44px;
     filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.24));
   }
   .split-button.single-version {
-    grid-template-columns: minmax(184px, auto);
+    grid-template-columns: minmax(184px, 1fr);
   }
   .split-button button {
     height: 48px;
@@ -172,16 +211,38 @@ const props = defineProps<{
     text-align: right;
   }
   .selected-version {
+    justify-self: stretch;
     display: flex;
     width: 100%;
     min-width: 0;
     align-items: center;
-    justify-content: flex-end;
-    gap: 9px;
+    justify-content: flex-start;
+    gap: 10px;
     color: rgba(245, 243, 239, 0.88);
     font-size: 13px;
+    text-align: left;
   }
-  .selected-version > span {
+  .selected-version-copy {
+    display: grid;
+    min-width: 0;
+    max-width: 100%;
+    justify-items: start;
+    gap: 4px;
+  }
+  .selected-version-line {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .selected-version-line-secondary {
+    gap: 8px;
+  }
+  .selected-version-name,
+  .selected-storage,
+  .selected-summary {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -192,7 +253,13 @@ const props = defineProps<{
     min-height: 16px;
     align-items: center;
     gap: 5px;
-    line-height: 1;
+    line-height: 1.15;
+  }
+  .selected-version-name span,
+  .selected-storage span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .selected-version-name svg {
     display: block;
@@ -210,24 +277,39 @@ const props = defineProps<{
     min-height: 14px;
     align-items: center;
     gap: 4px;
+    color: rgba(198, 199, 194, 0.74);
     line-height: 1;
   }
   .selected-file-size svg {
     display: block;
     flex: 0 0 auto;
   }
+  .selected-summary {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+    color: rgba(222, 224, 218, 0.7);
+    line-height: 1.2;
+  }
+  .selected-summary svg {
+    display: block;
+    flex: 0 0 auto;
+    color: rgba(222, 224, 218, 0.58);
+  }
+  .selected-summary span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .selected-storage {
     display: inline-flex;
-    min-width: 0;
     min-height: 14px;
     align-items: center;
     gap: 4px;
-    overflow: hidden;
     color: rgba(210, 211, 207, 0.68);
     font-size: 11px;
     line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .selected-storage svg {
     display: block;
@@ -378,6 +460,23 @@ const props = defineProps<{
     gap: 4px;
     line-height: 1;
   }
+  .version-summary {
+    min-width: 0;
+    overflow: hidden;
+    color: rgba(213, 216, 209, 0.58);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .version-summary.warning,
+  .support-badge {
+    color: #f2b8a2;
+  }
+  .support-badge {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+  }
   .file-size svg {
     display: block;
     flex: 0 0 auto;
@@ -413,9 +512,24 @@ const props = defineProps<{
     }
     .selected-version {
       order: 2;
-      justify-content: flex-start;
+      flex-wrap: wrap;
       padding: 0 8px;
       font-size: 12px;
+    }
+    .selected-version-copy {
+      width: 100%;
+      flex: 1 1 100%;
+    }
+    .selected-version-line {
+      width: 100%;
+    }
+    .selected-summary {
+      width: 100%;
+    }
+    .selected-version button {
+      margin-top: 2px;
+      padding-left: 0;
+      border-left: 0;
     }
     .selected-version small {
       font-size: 10px;

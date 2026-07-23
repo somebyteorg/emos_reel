@@ -1,5 +1,7 @@
 import { computed, type Ref, watch } from 'vue'
 import type { MediaSource, MediaVersion } from '@/api/types'
+import type { PlaybackCodec } from '@/utils/media-codecs'
+import { getMediaVersionBestVideoHeight, getMediaVersionPlaybackSupport } from '@/utils/media-metadata'
 
 interface UseMediaSourceSelectionOptions {
   sources: Readonly<Ref<readonly MediaSource[]>>
@@ -9,10 +11,21 @@ interface UseMediaSourceSelectionOptions {
   partNumber: Ref<number | null>
   mediaId: Ref<string>
   preferredMediaId?: Readonly<Ref<string | undefined>>
+  supportedCodecs?: Readonly<Ref<readonly PlaybackCodec[] | undefined>>
 }
 
 export function pickPreferredMediaVersion(versions: readonly MediaVersion[]) {
-  return versions.find((version) => /(^|\D)720p?(\D|$)/i.test(version.media_name)) ?? versions.find((version) => /(^|\D)1080p?(\D|$)/i.test(version.media_name)) ?? versions[0]
+  return (
+    versions.find((version) => getMediaVersionBestVideoHeight(version) === 720) ??
+    versions.find((version) => /(^|\D)720p?(\D|$)/i.test(version.media_name)) ??
+    versions.find((version) => getMediaVersionBestVideoHeight(version) === 1080) ??
+    versions.find((version) => /(^|\D)1080p?(\D|$)/i.test(version.media_name)) ??
+    versions[0]
+  )
+}
+
+function pickPreferredPlayableMediaVersion(versions: readonly MediaVersion[], supportedCodecs?: readonly PlaybackCodec[]) {
+  return pickPreferredMediaVersion(versions.filter((version) => getMediaVersionPlaybackSupport(version, supportedCodecs).playable)) ?? pickPreferredMediaVersion(versions)
 }
 
 export function useMediaSourceSelection(options: UseMediaSourceSelectionOptions) {
@@ -64,10 +77,20 @@ export function useMediaSourceSelection(options: UseMediaSourceSelectionOptions)
     versions,
     (nextVersions) => {
       if (nextVersions.some((version) => version.media_id === options.mediaId.value)) return
-      const preferredVersion = nextVersions.find((version) => version.media_id === options.preferredMediaId?.value)
-      options.mediaId.value = (preferredVersion ?? pickPreferredMediaVersion(nextVersions))?.media_id ?? ''
+      const preferredVersion = nextVersions.find((version) => version.media_id === options.preferredMediaId?.value && getMediaVersionPlaybackSupport(version, options.supportedCodecs?.value).playable)
+      options.mediaId.value = (preferredVersion ?? pickPreferredPlayableMediaVersion(nextVersions, options.supportedCodecs?.value))?.media_id ?? ''
     },
     { immediate: true },
+  )
+
+  watch(
+    () => options.supportedCodecs?.value,
+    (codecs) => {
+      if (!versions.value.length) return
+      const currentVersion = versions.value.find((version) => version.media_id === options.mediaId.value)
+      if (currentVersion && getMediaVersionPlaybackSupport(currentVersion, codecs).playable) return
+      options.mediaId.value = pickPreferredPlayableMediaVersion(versions.value, codecs)?.media_id ?? ''
+    },
   )
 
   return {

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import { ArrowDown01, ArrowDown10 } from '@lucide/vue'
+  import { ArrowDown01, ArrowDown10 } from '@lucide/vue'
 
-const props = defineProps<{
+  const props = defineProps<{
     modelValue: 'asc' | 'desc'
   }>()
 
