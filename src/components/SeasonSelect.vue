@@ -15,6 +15,14 @@
   const open = ref(false)
   const selectedSeason = computed(() => props.seasons.find((season) => season.season_number === props.modelValue) ?? props.seasons[0])
 
+  function seasonCode(seasonNumber: number) {
+    return `S${String(seasonNumber).padStart(2, '0')}`
+  }
+
+  function seasonTitle(season: SeasonInfo) {
+    return season.season_title.trim()
+  }
+
   function closeMenu(restoreFocus = false) {
     open.value = false
     if (restoreFocus) nextTick(() => trigger.value?.focus())
@@ -54,7 +62,11 @@
       @click="open = !open"
       @keydown.down.prevent="openWithKeyboard"
       @keydown.up.prevent="openWithKeyboard">
-      <span>{{ selectedSeason?.season_title || '选择季' }}</span>
+      <span v-if="selectedSeason" class="season-label">
+        <span class="season-code">{{ seasonCode(selectedSeason.season_number) }}</span>
+        <span v-if="seasonTitle(selectedSeason)" class="season-title">{{ seasonTitle(selectedSeason) }}</span>
+      </span>
+      <span v-else>选择季</span>
       <ChevronDown :class="{ rotated: open }" :size="16" />
     </button>
 
@@ -68,7 +80,10 @@
           role="option"
           type="button"
           @click="chooseSeason(season.season_number)">
-          <span>{{ season.season_title }}</span>
+          <span class="season-label">
+            <span class="season-code">{{ seasonCode(season.season_number) }}</span>
+            <span v-if="seasonTitle(season)" class="season-title">{{ seasonTitle(season) }}</span>
+          </span>
           <Check v-if="season.season_number === modelValue" :size="15" />
         </button>
       </div>
@@ -117,6 +132,29 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .season-label {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .season-code {
+    flex: 0 0 auto;
+    color: var(--reel-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .season-title {
+    min-width: 0;
+  }
+  .season-trigger:hover .season-code,
+  .season-trigger[aria-expanded='true'] .season-code,
+  .season-menu button.active .season-code {
+    color: var(--reel-accent-soft);
   }
   .season-trigger svg {
     color: var(--reel-muted);
