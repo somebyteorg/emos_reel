@@ -183,7 +183,7 @@ function parsePlaybackManifest(raw: unknown): PlaybackManifest {
     subtitles: parseManifestSubtitles(raw.subtitles),
     sprites: parseManifestSprites(raw.sprites),
   }
-  if (raw.play_type === 'url' && typeof raw.play_data.play_url === 'string' && raw.play_data.play_url && 'data' in raw.play_data) {
+  if (raw.play_type === 'proxy' && typeof raw.play_data.play_url === 'string' && raw.play_data.play_url && 'data' in raw.play_data) {
     return normalized as unknown as PlaybackManifest
   }
   if (raw.play_type === 'm3u8' && typeof raw.play_data.m3u8_master === 'string' && raw.play_data.m3u8_master) {

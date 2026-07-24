@@ -404,7 +404,7 @@
   function selectDecoderMode(mode: PlaybackDecoderMode) {
     if (decoderMode.value === mode) return
     decoderMode.value = mode
-    const shouldReload = engineKind.value === 'libmedia' || manifest.value?.play_type === 'url'
+    const shouldReload = engineKind.value === 'libmedia' || manifest.value?.play_type === 'proxy'
     dataWarning.value = mode === 'webcodecs' ? '已切到硬解' : '已切到软解'
     if (shouldReload) dataWarning.value += '，正在重新载入当前视频'
     if (shouldReload) {

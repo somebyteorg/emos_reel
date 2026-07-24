@@ -888,7 +888,7 @@ export function usePlaybackEngine(options: UsePlaybackEngineOptions) {
 
   async function loadLibmedia(loadOptions: LoadPlaybackOptions) {
     const { cacheKey, manifest, startTime, preferredAudioId } = loadOptions
-    if (manifest.play_type !== 'url') throw new Error('libmedia 播放源类型错误')
+    if (manifest.play_type !== 'proxy') throw new Error('libmedia 播放源类型错误')
     const sourceUrl = manifest.play_data.play_url
     const playDataBody = manifest.play_data.data
     const container = options.libmediaContainer.value
@@ -1140,7 +1140,7 @@ export function usePlaybackEngine(options: UsePlaybackEngineOptions) {
 
   async function load(loadOptions: LoadPlaybackOptions) {
     await destroy()
-    engineKind.value = loadOptions.manifest.play_type === 'url' ? 'libmedia' : 'shaka'
+    engineKind.value = loadOptions.manifest.play_type === 'proxy' ? 'libmedia' : 'shaka'
     if (engineKind.value === 'libmedia') await loadLibmedia(loadOptions)
     else await loadShaka(loadOptions)
   }

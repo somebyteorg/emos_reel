@@ -237,8 +237,8 @@ interface PlaybackManifestBase {
  * Direct file playback (MKV/MP4/…) — frontend POSTs to play_url with
  * `play_data.data` as the JSON body and streams the response bytes.
  */
-export type UrlPlaybackManifest = PlaybackManifestBase & {
-  play_type: 'url'
+export type ProxyPlaybackManifest = PlaybackManifestBase & {
+  play_type: 'proxy'
   play_data: { play_url: string; data: unknown }
 }
 
@@ -248,7 +248,7 @@ export type M3u8PlaybackManifest = PlaybackManifestBase & {
   play_data: { m3u8_master: string }
 }
 
-export type PlaybackManifest = UrlPlaybackManifest | M3u8PlaybackManifest
+export type PlaybackManifest = ProxyPlaybackManifest | M3u8PlaybackManifest
 
 export interface PlaybackProgressPayload {
   media_id: string
